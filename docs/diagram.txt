@@ -1,0 +1,20 @@
+ Agent               Cloud                 Phone                 Site SDK
+ |                   |                     |                     |
+ |------------------->                     |                     |
+ |                   |                     |                     |1. register agent (name, pubkey)
+ |                   |--------------------->                     |
+ |                   |                     |                     |2. approval txn (site, scopes)
+ |                   |                     |                     |push: "Jarvis wants jobboard:
+ |                   |                     |                     |read + apply"
+ |                   |---------------------<                     |
+ |                   |                     |                     |3. signed WebAuthn assertion
+ |-------------------<                     |                     |
+ |4. txn approved    |                     |                     |
+ |------------------->                     |                     |
+ |                   |                     |                     |5. exchange receipt->AT+refresh
+ |--------------------------------------------------------------->
+ |                   |                     |                     |6. Bearer <AT> + DPoP (nonce)
+ |                   |                     |                     |7. site verifies AT+DPoP+revoke
+ |---------------------------------------------------------------<
+ |                   |                     |                     |8. 200 OK (as user, scoped)
+ |                   |                     |                     |
