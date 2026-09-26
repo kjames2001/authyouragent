@@ -227,3 +227,62 @@ def _rand(n=16):
 def b64(x: bytes) -> str:
     import base64
     return base64.urlsafe_b64encode(x).rstrip(b"=").decode()
+
+
+def b64dec(s: str) -> bytes:
+    import base64
+    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+
+def keygen():
+    """§10.1: generate an agent keypair LOCALLY, in the agent runtime.
+    The private key never touches the network. Returns (privkey_pem, pubkey_pem)."""
+    key = ec.generate_private_key(ec.SECP256R1())
+    priv = key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption()).decode()
+    pub = key.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode()
+    return priv, pub
+
+
+def agent_jwk(pubkey_pem: str) -> dict:
+    """Emit the RFC 7515 JWK the PWA posts when registering an agent whose
+    key was generated locally by the agent runtime."""
+    pub = serialization.load_pem_public_key(
+        pubkey_pem.encode() if isinstance(pubkey_pem, str) else pubkey_pem)
+    n = pub.public_numbers()
+    return {"kty": "EC", "crv": "P-256",
+            "x": b64(n.x.to_bytes(32, "big")),
+            "y": b64(n.y.to_bytes(32, "big"))}
+
+# ------------------------------------------------------------ CLI
+#   python -m surety_agent keygen --name "Hermes JARVIS"
+#   -> prints {"agent_key": {...}} ; the agent keeps the privkey, and the
+#      user's phone registers the pubkey with the cloud (cloud never sees
+#      the private key — §10.1).
+
+def _cli_keygen(name):
+    priv, pub = keygen()
+    print(json.dumps({
+        "agent_key": {
+            "name": name,
+            "jwk": agent_jwk(pub),
+            "pubkey_pem": pub,
+            "privkey_pem": priv,
+            "note": ("agent runtime: keep privkey_pem local. "
+                     "Phone/PWA: register jwk (+name) with the cloud; "
+                     "the cloud will return agent_id, which the runtime "
+                     "uses to build its SuretyAgent."),
+        }
+    }, indent=2))
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser(prog="surety_agent")
+    ap.add_argument("cmd", choices=["keygen"])
+    ap.add_argument("--name", default="agent")
+    args = ap.parse_args()
+    if args.cmd == "keygen":
+        _cli_keygen(args.name)
