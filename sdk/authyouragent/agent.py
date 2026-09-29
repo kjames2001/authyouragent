@@ -307,6 +307,42 @@ class AgentClient:
         except httpx.HTTPError as e:
             raise AgentError(f"request failed: {e}")
 
+    def check_status(self):
+        """Check whether this agent is still authorized by the owner.
+        Returns a dict with 'status' (active/revoked), 'global_flag',
+        'agent_name', and 'revoked_sites'.
+        Raises AgentError if the server cannot be reached or the JWT is invalid."""
+        try:
+            r = self.client.get(
+                f"{self.base}/api/v1/agent-status",
+                headers={"X-Agent-JWT": self._agent_jwt()},
+                params={"agent_id": self.agent_id},
+                timeout=10)
+        except httpx.HTTPError as e:
+            raise AgentError(f"status check failed: {e}")
+        if r.status_code == 401:
+            raise AgentError("agent JWT rejected — the key may be invalid or the agent deleted")
+        if r.status_code == 403:
+            return {"status": "revoked", "global_flag": "revoked", "revoked_sites": []}
+        if r.status_code != 200:
+            raise AgentError(f"status check returned {r.status_code}: {r.text[:200]}")
+        return r.json()
+
+    def report_status(self, status, site="", detail=""):
+        """Report this agent's current status to the server so the owner's
+        dashboard shows what the agent is doing. Best-effort: errors are
+        printed but not raised, so a reporting failure never blocks the agent."""
+        try:
+            r = self.client.post(
+                f"{self.base}/api/v1/agent-status",
+                json={"agent_id": self.agent_id, "agent_jwt": self._agent_jwt(),
+                      "status": status, "site": site, "detail": detail},
+                timeout=10)
+            if r.status_code >= 400:
+                print(f"[authyouragent] status report failed: {r.status_code}")
+        except Exception as e:
+            print(f"[authyouragent] status report failed: {e}")
+
     def _stepup(self, site, action):
         try:
             r = self.client.post(f"{self.base}/api/v1/stepup", json={

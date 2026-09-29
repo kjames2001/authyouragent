@@ -33,12 +33,15 @@ pip install "authyouragent[takeover]"
 
 ## MCP server
 
-The `authyouragent-mcp` command starts an MCP server with four tools:
+The `authyouragent-mcp` command starts an MCP server with seven tools:
 
 1. **`check_login_wall`** -- examines the current page and reports whether it is blocked (password, CAPTCHA, 2FA, or sign-in approval).
-2. **`request_takeover`** -- sends a push notification to the user's phone. Blocks until they finish or 4 minutes expire. Returns `done`, `cancelled`, `expired`, or `agent_left`.
+2. **`request_takeover`** -- sends a push notification to the user's phone. Blocks until they finish or 4 minutes expire. Returns `done`, `cancelled`, `expired`, or `agent_left`. After handback, the login session stays active so the agent can continue.
 3. **`wait_for_takeover`** -- if `request_takeover` timed out, call this to keep waiting.
-4. **`report_site`** -- report a site where takeover did not work, so coverage can be improved.
+4. **`request_approval`** -- asks the owner to approve a sensitive action (delete, purchase, settings change) before the agent performs it.
+5. **`clear_session`** -- clears cookies, localStorage and sessionStorage. Call when done with a site after takeover.
+6. **`check_agent_status`** -- checks whether the agent is still authorized. The owner can revoke at any time.
+7. **`report_site`** -- report a site where takeover did not work, so coverage can be improved.
 
 ### Configuration
 

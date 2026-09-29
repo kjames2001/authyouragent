@@ -17,7 +17,8 @@ Environment:
                  "auto" (default) to find a local Chromium started with
                  --remote-debugging-port. The agent can also pass cdp_url.
 
-Tools: check_login_wall, request_takeover, wait_for_takeover.
+Tools: check_login_wall, request_takeover, wait_for_takeover, request_approval,
+       clear_session, check_agent_status, report_site.
 Every check reads the page's form fields and text; no screenshots, so
 agents without vision can use it. Requires `pip install "authyouragent[mcp]"`.
 """
@@ -167,19 +168,26 @@ def _report(job_id, job, result):
 
 
 async def _run(job, cdp_url, page_url, reason):
+    agent = _get_agent()
     async with _playwright() as p:
         page = await _page(p, cdp_url, page_url)
         job["url"] = page.url
+
+        # Report takeover started to server (for owner dashboard)
+        agent.report_status("takeover_started", site=page.url.split("/")[2] if "/" in page.url else "",
+                            detail=reason[:200])
 
         async def check(pg):
             try:
                 return not await pg.evaluate(BLOCKING_JS)
             except Exception:
                 return False
-        result = await takeover(_get_agent(), page, reason,
+        result = await takeover(agent, page, reason,
                                 verify=not os.environ.get("AYA_INSECURE"), check=check,
-                                clear_session=True)
+                                clear_session=False)
         job["final"] = await _describe(page)
+        # Report takeover result to server
+        agent.report_status(f"takeover_{result}", site=page.url.split("/")[2] if "/" in page.url else "")
         return result     # leaving the block only drops our CDP link; the browser stays open
 
 
@@ -235,7 +243,10 @@ async def request_takeover(reason: str, cdp_url: str = "", page_url: str = "",
     wait_seconds with result: waiting and a takeover_id for wait_for_takeover.
     reason: one short line shown to the owner, e.g. "Please sign in to example.com".
     cdp_url: your Chromium's CDP port or URL (optional if the server has a default).
-    page_url: which tab, if several are open (optional)."""
+    page_url: which tab, if several are open (optional).
+    After handback the owner's login session stays active so you can continue your task
+    on the logged-in page. When you are done with the site, call clear_session to wipe
+    cookies, localStorage and sessionStorage so you cannot reuse the owner's session."""
     active = [k for k, j in _jobs.items() if not j["task"].done()]
     if active:
         return (f"result: busy\ntakeover_id: {active[0]}\nA take over is already open. "
@@ -284,6 +295,134 @@ async def report_site(site: str, kind: str, detail: str = "", url: str = "") -> 
             _log("site reported:", site, kind)
             return f"reported: {site} ({kind})\nThank you. The team will look into it."
         return f"error: server returned {r.status_code}: {r.text[:200]}"
+    except Exception as e:
+        return f"error: {type(e).__name__}: {e}"
+
+
+@mcp.tool()
+async def request_approval(site: str, action: str, wait_seconds: int = 120,
+                           ctx: Context = None) -> str:
+    """Ask your owner to approve a sensitive action before you perform it.
+    The owner receives a push notification on their phone showing the site and action.
+    They approve or deny. You should not perform the action until this returns approved.
+    Use this before deleting data, changing settings, making purchases, modifying
+    permissions, or any action that could have irreversible consequences.
+    site: the domain or URL of the site where the action will be performed, e.g. "github.com".
+    action: a short label for the action, e.g. "delete repository", "change password",
+            "purchase subscription". Keep it under 64 chars, lowercase with underscores.
+    wait_seconds: how long to wait for the owner's response (default 120, max 290).
+    Returns: "approved" or "denied" or "expired" (owner did not respond in time)."""
+    import httpx
+    agent = _get_agent()
+    # Normalize action
+    import re
+    action_norm = re.sub(r"[^a-z0-9_ :-]", "", action.lower()).strip().replace(" ", "_")[:64] or "action"
+    site_norm = re.sub(r"^https?://", "", site).split("/")[0].lower()[:200]
+
+    # Request approval from the server (agent-initiated, no site grant needed)
+    try:
+        r = await asyncio.to_thread(
+            agent.client.post,
+            f"{agent.base}/api/v1/agent-approval",
+            json={"agent_id": agent.agent_id, "agent_jwt": agent._agent_jwt(),
+                  "site": site_norm, "action": action_norm},
+            timeout=15
+        )
+        if r.status_code != 200:
+            return f"error: server returned {r.status_code}: {r.text[:200]}"
+        data = r.json()
+        txn_id = data.get("txn_id")
+        expires_in = data.get("expires_in", 60)
+        _log("approval requested:", site_norm, action_norm, "txn:", txn_id)
+    except Exception as e:
+        return f"error: {type(e).__name__}: {e}"
+
+    # Poll for the owner's response
+    deadline = time.time() + min(wait_seconds, WAIT_MAX)
+    while time.time() < deadline:
+        await asyncio.sleep(3)
+        try:
+            r = await asyncio.to_thread(
+                agent.client.get,
+                f"{agent.base}/api/v1/authz-requests/{txn_id}",
+                timeout=10
+            )
+            if r.status_code == 200:
+                status = r.json().get("status")
+                if status in ("approved", "denied", "expired", "cancelled"):
+                    _log("approval result:", status)
+                    if status == "approved":
+                        return (f"approved\nThe owner approved the action '{action_norm}' "
+                                f"on {site_norm}. You may proceed.")
+                    elif status == "denied":
+                        return (f"denied\nThe owner denied the action '{action_norm}' "
+                                f"on {site_norm}. Do not proceed.")
+                    elif status == "expired":
+                        return (f"expired\nThe owner did not respond in time for "
+                                f"'{action_norm}' on {site_norm}.")
+                    else:
+                        return f"cancelled\nThe approval was cancelled."
+        except Exception:
+            pass
+        if ctx is not None:
+            try:
+                await ctx.report_progress(time.time() - (deadline - min(wait_seconds, WAIT_MAX)),
+                                          None)
+            except Exception:
+                pass
+
+    return (f"expired\nThe owner did not respond in time for '{action_norm}' "
+            f"on {site_norm}.")
+
+
+@mcp.tool()
+async def clear_session(cdp_url: str = "", page_url: str = "") -> str:
+    """Clear the browser session (cookies, localStorage, sessionStorage) on the current
+    page. Call this when you are done with a site after a takeover, so the owner's login
+    session is wiped and you cannot reuse it. This is the cleanup step after
+    request_takeover. You should not call this until your task on the site is complete.
+    cdp_url: your Chromium's CDP port or URL (optional if the server has a default).
+    page_url: which tab, if several are open (optional)."""
+    from .takeover import _clear_session
+    async with _playwright() as p:
+        page = await _page(p, cdp_url, page_url)
+        where = await _describe(page)
+        await _clear_session(page)
+    # Report to server so the user's dashboard shows the session was cleared
+    agent = _get_agent()
+    agent.report_status("session_cleared", site=where[:200])
+    _log("session cleared on:", where)
+    return f"cleared\nSession (cookies, localStorage, sessionStorage) cleared on {where}."
+
+
+@mcp.tool()
+async def check_agent_status() -> str:
+    """Check whether your agent is still authorized by the owner. The owner can revoke
+    your access at any time from their phone. Call this periodically (e.g. before
+    starting a new task) to verify you are still active.
+    Returns: active / revoked / error."""
+    agent = _get_agent()
+    try:
+        r = await asyncio.to_thread(
+            agent.client.get,
+            f"{agent.base}/api/v1/agent-status",
+            headers={"X-Agent-JWT": agent._agent_jwt()},
+            params={"agent_id": agent.agent_id},
+            timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            status = data.get("status", "active")
+            if status == "revoked":
+                return ("revoked\nThe owner has revoked your access. Stop all work "
+                        "immediately and inform the owner.")
+            revoked_sites = data.get("revoked_sites", [])
+            return (f"active\nYou are authorized. Agent: {data.get('agent_name','?')}"
+                    + (f"\nRevoked sites: {', '.join(revoked_sites)}" if revoked_sites else ""))
+        elif r.status_code == 403:
+            return "revoked\nThe owner has revoked your access. Stop all work immediately."
+        elif r.status_code == 401:
+            return "error: authentication failed (invalid agent JWT)"
+        return f"error: server returned {r.status_code}"
     except Exception as e:
         return f"error: {type(e).__name__}: {e}"
 

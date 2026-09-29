@@ -109,14 +109,36 @@ Take over needs the agent's browser to be Chromium (Chrome, Chromium, Edge or a 
 
 ## Clearing the owner's session
 
-When the owner signs in during a take over, the site sets cookies and session tokens in the agent's browser. Without clearing them, the agent could keep using the owner's login after the take over ends — potentially unlimited access.
+When the owner signs in during a take over, the site sets cookies and session tokens in the agent's browser. The agent continues its task on the logged-in page, then calls `clear_session` when done to wipe the session.
 
-Pass `clear_session=True` (Python) or `clearSession: true` (JavaScript) to clear cookies, localStorage and sessionStorage from the page's context after the owner finishes. The MCP server does this by default. The owner's typed credentials are never stored or read; only what the site itself saved in the browser is cleared.
+### Python SDK
+
+Pass `clear_session=True` to auto-clear after the owner finishes, or `clear_session=False` (default) to keep the session active and clear it yourself later:
 
 ```python
+# Option A: auto-clear (simple tasks)
 result = await takeover(agent, page, "Please sign in to example.com",
                         check=login_finished, clear_session=True)
+
+# Option B: manual clear (agent needs the session to continue working)
+result = await takeover(agent, page, "Please sign in to example.com",
+                        check=login_finished, clear_session=False)
+# ... agent does its work on the logged-in page ...
+agent.report_status("session_cleared", site="example.com")
+# Then clear the browser session:
+from authyouragent.takeover import _clear_session
+await _clear_session(page)
 ```
+
+### JavaScript SDK
+
+Pass `clearSession: true` or `clearSession: false` (default).
+
+### MCP server
+
+The MCP server does NOT auto-clear. After `request_takeover` returns `done`, the agent works on the logged-in page, then calls the `clear_session` tool to wipe cookies, localStorage and sessionStorage. The server logs the status change.
+
+The owner's typed credentials are never stored or read; only what the site itself saved in the browser is cleared.
 
 If the owner cancels or the take over times out, nothing is cleared (no login happened). If the owner presses Done but the page still looks blocked (`incomplete`), the session is cleared as a safety measure.
 
@@ -128,3 +150,62 @@ If you are not using an SDK:
 2. Open a WebSocket to `/api/v1/takeover/{takeover_id}/agent` with the header `Authorization: Bearer <agent_token>`. A token in the URL is refused.
 3. Send `{"t":"frame","data":<base64 JPEG>,"w":..,"h":..}` for each screen frame (for example from CDP `Page.startScreencast`), `{"t":"url","url":..}` after navigation, and `{"t":"focus","field":{"x","y","w","h","kind","fs","value"}}` (or `"field": null`) after each click. Send `{"t":"done"}` when your own check sees the job finished.
 4. You receive `live`, `click` (`x`, `y` in page pixels), `set` (`value`: replace the focused field's text), `text`, `key`, `scroll` (`dy`) and a final `done`, `cancelled` or `expired`.
+
+## Take over MCP server
+
+The Take over MCP server exposes seven tools so any MCP-capable agent (Claude, Cursor, Hermes, etc.) can use Take over without writing code.
+
+### Install
+
+```bash
+pip install "authyouragent[mcp]"
+```
+
+### Configure
+
+```json
+{
+  "mcpServers": {
+    "authyouragent": {
+      "command": "authyouragent-mcp",
+      "env": {
+        "AYA_CLOUD": "https://authyouragent.com",
+        "AYA_AGENT_ID": "ag_your_agent_id",
+        "AYA_KEY_FILE": "/path/to/your-agent-key.pem"
+      }
+    }
+  }
+}
+```
+
+A Chromium browser must be running with `--remote-debugging-port=9222`. The MCP server auto-discovers it.
+
+### Seven tools
+
+| Tool | Purpose |
+|---|---|
+| `check_login_wall` | Detect login, CAPTCHA, 2FA or sign-in approval walls on the current page. |
+| `request_takeover` | Ask the owner to take over the browser from their phone. Returns when they finish or time out. |
+| `wait_for_takeover` | Keep waiting for a takeover that `request_takeover` reported as still in progress. |
+| `request_approval` | Ask the owner to approve a sensitive action (delete, purchase, settings change). Returns `approved` or `denied`. |
+| `clear_session` | Clear cookies, localStorage and sessionStorage. Call when done with a site after takeover. |
+| `check_agent_status` | Check if the agent is still authorized. The owner can revoke at any time. |
+| `report_site` | Report a site where takeover did not work, so coverage can be improved. |
+
+### Status reporting
+
+The MCP server reports the agent's status to the Auth Your Agent server throughout:
+
+- `takeover_started` -- when the agent requests a takeover
+- `takeover_done` / `takeover_cancelled` / `takeover_expired` -- when the takeover ends
+- `session_cleared` -- when the agent calls `clear_session`
+
+These appear in the owner's activity log and dashboard.
+
+### Agent-initiated approval
+
+The `request_approval` tool sends a push notification to the owner's phone with the site and action. The owner approves or denies. This does NOT require the site to have adopted Auth Your Agent -- it works for any site, using the `POST /api/v1/agent-approval` endpoint.
+
+### Agent revocation
+
+The owner can revoke an agent at any time from the Auth Your Agent app. The `check_agent_status` tool detects this and tells the agent to stop. Every server call (takeover, approval, status report) also validates the agent's JWT, so a revoked agent cannot make further requests.

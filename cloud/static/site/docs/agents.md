@@ -81,7 +81,7 @@ Follow `next_step`. A `429` carries a `Retry-After` header: wait that long befor
 
 Sometimes you reach a login page, a CAPTCHA, a 2FA prompt, or some other wall you cannot pass on your own. If the site has not adopted Auth Your Agent, you do not need the site's cooperation. Ask your user to **take over** your browser.
 
-Your user opens the Auth Your Agent app on their phone, sees a live view of your browser, and drives it themselves. They type the password, solve the CAPTCHA, enter the 2FA code. The site sees a normal human sign-in. When your user finishes, the browser is handed back to you automatically, and their login session (cookies, localStorage) is cleared so you cannot reuse it. You continue your task past the step that needed them.
+Your user opens the Auth Your Agent app on their phone, sees a live view of your browser, and drives it themselves. They type the password, solve the CAPTCHA, enter the 2FA code. The site sees a normal human sign-in. When your user finishes, the browser is handed back to you automatically. You continue your task on the logged-in page. When you are done with the site, call clear_session to wipe the login session.
 
 ### How to use Take over
 
@@ -110,12 +110,15 @@ Register it with your agent framework. For example, in your MCP config:
 }
 ```
 
-Four tools become available:
+Seven tools become available:
 
 1. **`check_login_wall`** -- examines the current page and tells you whether it is blocked (password, CAPTCHA, 2FA, or sign-in approval). If blocked, it tells you to call `request_takeover`.
-2. **`request_takeover`** -- sends a notification to your user's phone. Blocks until they finish (or 4 minutes, whichever comes first). Returns `done`, `cancelled`, `expired`, or `agent_left`.
+2. **`request_takeover`** -- sends a notification to your user's phone. Blocks until they finish (or 4 minutes, whichever comes first). Returns `done`, `cancelled`, `expired`, or `agent_left`. After handback, the owner's login session stays active so you can continue your task on the logged-in page.
 3. **`wait_for_takeover`** -- if `request_takeover` timed out, call this to keep waiting.
-4. **`report_site`** -- if anything goes wrong on a real site (login form not detected, takeover failed, handback did not trigger), call this to report it. The team uses these reports to improve site coverage. Be specific: include the site domain and what happened.
+4. **`request_approval`** -- asks your owner to approve a sensitive action before you perform it (delete data, change settings, make a purchase, modify permissions). The owner gets a push notification and approves or denies on their phone. Do not perform the action until this returns `approved`.
+5. **`clear_session`** -- clears cookies, localStorage and sessionStorage on the current page. Call this when you are done with a site after a takeover, so the owner's login session is wiped and you cannot reuse it.
+6. **`check_agent_status`** -- checks whether you are still authorized by the owner. The owner can revoke your access at any time. Call this before starting a new task.
+7. **`report_site`** -- if anything goes wrong on a real site (login form not detected, takeover failed, handback did not trigger), call this to report it. The team uses these reports to improve site coverage. Be specific: include the site domain and what happened.
 
 Typical usage:
 
@@ -124,7 +127,8 @@ Typical usage:
 2. Call check_login_wall.
 3. If blocked, tell your user: "I need you to sign in to example.com. I'll send a request to your phone."
 4. Call request_takeover.
-5. When it returns "done", continue your task. The login session is already cleared.
+5. When it returns "done", continue your task on the logged-in page.
+6. When you are done with the site, call clear_session to wipe the owner's login session.
 ```
 
 **With the Python SDK** (if you control the browser via Playwright or CDP):
@@ -142,14 +146,14 @@ result = await takeover(agent, page, "Please sign in to example.com so I can che
 # result is "done", "cancelled", "expired", or "refused"
 ```
 
-Pass `clear_session=True` to clear cookies, localStorage and sessionStorage after the owner finishes, so you cannot reuse their login session.
+Pass `clear_session=True` to auto-clear cookies, localStorage and sessionStorage after the owner finishes. Default is `False` — the session stays active so you can continue, and you call `clear_session` (MCP) or `agent.report_status("session_cleared")` (SDK) when done.
 
 ### Rules for Take over
 
 - **Tell your user first.** Say which site and why: "I'm stuck at the login page of example.com. I'll ask you to take over so you can sign in for me."
 - **Wait for the result.** Do not navigate away or close the page while the take over is in progress.
 - **A cancellation is an answer.** If your user cancels or refuses, stop and tell them. Do not retry unless they ask you to.
-- **Do not try to read what your user typed.** Their credentials are not visible to you. The session is cleared when they finish.
+- **Do not try to read what your user typed.** Their credentials are not visible to you. Call clear_session when you are done with the site.
 - **Continue your task after "done".** You are past the step that needed them. The page is now in whatever state your user left it (signed in, or whatever they did).
 
 ## Where to read more
