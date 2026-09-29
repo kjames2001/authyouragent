@@ -3,3 +3,44 @@ data/
 logs/
 __pycache__/
 *.pyc
+mcp_layer/state_*
+mcp_layer/servers/*_mcp.py
+*.tar.gz
+
+# Secrets
+*.pem
+*.key
+*.token
+firebase-*.json
+google-services.json
+
+# Build artifacts
+*.apk
+*.pptx
+*.pdf
+
+# Node
+node_modules/
+
+# Android
+authyouragent-android/app/build/
+authyouragent-android/.gradle/
+authyouragent-android/local.properties
+
+# Database
+*.db
+*.db-journal
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backups
+backups/
+*.tgz

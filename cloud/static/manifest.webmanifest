@@ -1,8 +1,9 @@
 {
-  "name": "Auth Your Agent (AYA)",
-  "short_name": "AYA",
+  "name": "Auth Your Agent",
+  "short_name": "Auth Your Agent",
   "description": "Approve, scope and revoke what your AI agents may do on your behalf, across the web.",
-  "start_url": "/",
+  "start_url": "/app",
+  "scope": "/",
   "display": "standalone",
   "theme_color": "#0f3460",
   "background_color": "#0d1117",

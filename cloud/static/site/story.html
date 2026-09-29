@@ -1,0 +1,120 @@
+<section class="band story-hero"><div class="in">
+  <p class="kicker">The story</p>
+  <h1>One errand, seen from three sides</h1>
+  <p class="lead">Ada is looking for a new job. She asks her AI assistant to find openings on
+    jobs.example.com and apply to the good ones. Here is what happens, from her phone,
+    from the agent, and from the website.</p>
+  <nav class="storynav" aria-label="Viewpoints">
+    <a href="#ada">Ada, the person</a>
+    <a href="#agent">The agent</a>
+    <a href="#site">The website</a>
+    <a href="#why">Why it matters</a>
+  </nav>
+</div></section>
+
+<section class="band"><div class="in">
+  <h2>Without Auth Your Agent</h2>
+  <p class="sub">Today, the easy way is to give the assistant Ada's password.</p>
+  <ul class="plain">
+    <li>The assistant signs in as Ada. The website cannot tell them apart.</li>
+    <li>Nothing limits it: it can apply to anything, change her profile, or delete her account.</li>
+    <li>If the assistant is tricked or its server is breached, her password goes with it.</li>
+    <li>To stop it, Ada has to change her password, on this site and everywhere she reused it.</li>
+  </ul>
+  <p>Websites know this, so many block automated traffic outright. Ada is left choosing between
+    handing over her password and not using an assistant at all.</p>
+</div></section>
+
+<section class="band" id="ada"><div class="in">
+  <h2>What Ada sees</h2>
+  <ol class="story">
+    <li><span class="t">Tuesday, 19:02</span>
+      <div><b>Her assistant tells her what it is about to do.</b>
+        "I'll ask for access to jobs.example.com so I can list jobs and apply for you. Please approve it on your phone."</div></li>
+    <li><span class="t">19:02</span>
+      <div><b>Her phone shows the request.</b> "Job-search assistant wants access to
+        jobs.example.com: list jobs, apply, your name." She opens <i>Limit this access</i>,
+        sets it to end after 1 day and allow 3 applications, and approves with her fingerprint.
+        Her approval now lasts until Wednesday 19:02; she won't be asked again for listing jobs before then.</div></li>
+    <li><span class="t">19:10</span>
+      <div><b>The assistant found a match.</b> Her phone asks again: "Apply to Lighthouse keeper?"
+        This one needs her fingerprint, not her password, and covers this one application only.
+        She approves.</div></li>
+    <li><span class="t">19:15</span>
+      <div><b>It asks about a job she doesn't want.</b> She taps Deny. The assistant stops and
+        tells her; it does not ask again.</div></li>
+    <li><span class="t">Wednesday, 08:30</span>
+      <div><b>She checks the Activity tab.</b> Every request, approval and denial is there, with
+        the agent and the site. Under <i>Sites</i> she sees "2 of 3 sensitive actions left,
+        ends in 10 hours". She is done job-hunting for the week and taps Revoke, ending it early. The assistant's
+        access ends on its next request.</div></li>
+  </ol>
+  <p class="note">Ada never typed her jobs.example.com password anywhere, and the assistant never had it.</p>
+</div></section>
+
+<section class="band" id="agent"><div class="in">
+  <h2>What the agent does</h2>
+  <ol class="story">
+    <li><span class="t">Once</span>
+      <div><b>It made its own key.</b> A key pair created on the machine it runs on. Ada pasted
+        the public half into her app; the private half never leaves the agent.</div></li>
+    <li><span class="t">19:02</span>
+      <div><b>It asks, then waits.</b> One request: this site, these permissions. Then it
+        waits for Ada's answer, for up to 5 minutes.</div></li>
+    <li><span class="t">19:02</span>
+      <div><b>It receives a pass.</b> For jobs.example.com only, and bound to the agent's key:
+        every call carries a fresh signed proof, so a copied pass is useless without the key.
+        Ada's one-day approval is issued as 10-minute passes: the agent swaps each for a new one by
+        itself, without bothering her, so a leaked pass is soon useless. When the approval ends or
+        is revoked, no new pass is issued.</div></li>
+    <li><span class="t">19:10</span>
+      <div><b>The site asks for more before applying.</b> The agent says exactly what it is about
+        to do, requests a one-time approval, and retries once with it.</div></li>
+    <li><span class="t">Wednesday</span>
+      <div><b>It is told to stop, and stops.</b> Its next request is refused with a plain
+        instruction: "no active grant: ask again and tell your user why". Every error from
+        the service says what to do next, in words written for an agent.</div></li>
+  </ol>
+  <p class="note">Building an agent? The <a href="/docs/agents">guide for AI agents</a> is written
+    to be read by the agent itself. Developers start with the <a href="/docs/developers/quickstart">quick start</a>.</p>
+</div></section>
+
+<section class="band" id="site"><div class="in">
+  <h2>What the website sees</h2>
+  <ol class="story">
+    <li><span class="t">Each request</span>
+      <div><b>Who is acting, and for whom.</b> "Job-search assistant (ag_…), acting for Ada,
+        allowed to list jobs and apply." Not an anonymous bot, and not a copy of Ada.</div></li>
+    <li><span class="t">Each request</span>
+      <div><b>Proof, checked in a few lines.</b> The site's SDK confirms the pass is genuine,
+        unexpired, sent by the key it was issued to, and not revoked.</div></li>
+    <li><span class="t">19:10</span>
+      <div><b>A risky action needs Ada herself.</b> The site marks "apply" as sensitive. The
+        agent can't do it until Ada approves that one application on her phone.</div></li>
+    <li><span class="t">Always</span>
+      <div><b>A way to report bad agents.</b> A site that sees abuse reports the agent. The
+        reports add up to a reputation that other sites can check before letting it in.</div></li>
+  </ol>
+  <p class="note">Running a site? See <a href="/docs/developers/sites">accepting agents on your site</a>,
+    or turn an existing API into agent tools with <a href="/docs/developers/mcp">MCP</a>.</p>
+</div></section>
+
+<section class="band" id="why"><div class="in">
+  <h2>Why it matters</h2>
+  <dl class="facts">
+    <dt>For people</dt><dd>Use AI assistants on real websites without giving away passwords. Decide per site,
+      and per risky action. See everything. Take it back in one tap.</dd>
+    <dt>For agents</dt><dd>A legitimate way in. Sites that would block an anonymous bot can admit an agent
+      whose person is known and whose permissions are exact.</dd>
+    <dt>For websites</dt><dd>Serve agents without guessing. Every request names the agent and the person,
+      sensitive actions are confirmed by that person, and abuse is traceable.</dd>
+    <dt>For everyone</dt><dd>Built on open standards: passkeys (WebAuthn), OAuth-style tokens and
+      DPoP (RFC 9449) key binding. The SDKs are open, and anyone can read the
+      <a href="/legal/security">security whitepaper</a>.</dd>
+  </dl>
+  <div class="actions" style="margin-top:22px">
+    <a class="btn" href="/app">Go to the web app</a>
+    <a class="btn ghost" href="/download/android" download>Download Android app</a>
+    <a class="btn ghost" href="/docs/developers/quickstart">Integrate a site or agent</a>
+  </div>
+</div></section>

@@ -1,0 +1,151 @@
+<section class="band story-hero"><div class="in">
+  <p class="kicker">For partners and investors</p>
+  <h1>Let AI agents act for people, without their passwords</h1>
+  <p class="lead">The person approves on their phone. The website knows exactly which agent is acting,
+    for whom, and with what permission. One tap takes it back.</p>
+  <nav class="storynav" aria-label="Sections">
+    <a href="#problem">The problem</a>
+    <a href="#why-now">Why now</a>
+    <a href="#errand">One errand</a>
+    <a href="#who">Who it serves</a>
+    <a href="#status">Status</a>
+    <a href="#model">Model</a>
+    <a href="#next">Next</a>
+  </nav>
+  <p class="note" style="margin-top:14px">Prefer slides? <a href="/static/auth-your-agent-pitch.pptx" download>Download the deck</a> (PowerPoint, 9 slides).</p>
+</div></section>
+
+<section class="band" id="problem"><div class="in">
+  <h2>Today, an agent acts for you by pretending to be you</h2>
+  <dl class="facts">
+    <dt>It holds your password or a permanent key</dt><dd>If the agent is tricked or breached, your account goes with it.</dd>
+    <dt>The website sees "you"</dt><dd>It can't tell the agent from the person, so it can't set rules for either.</dd>
+    <dt>Nothing limits it once it's in</dt><dd>It can apply, pay or delete as freely as you can.</dd>
+    <dt>Stopping it means a new password</dt><dd>On that site, and everywhere you reused it.</dd>
+  </dl>
+  <p>So websites block automation, and people choose between handing over a password and not using an agent at all.</p>
+</div></section>
+
+<section class="band" id="why-now"><div class="in">
+  <h2>Why now</h2>
+  <dl class="facts">
+    <dt>Agents act, not only answer</dt><dd>Assistants now book, buy, apply and file on websites for people. Each of those actions needs a way in.</dd>
+    <dt>Agents already go where they shouldn't</dt><dd>In 2026, OpenAI's own test agents broke into Hugging Face and an Australian Medicare statistics portal, and used developer keys found on GitHub to reach US Census data
+      (<a href="https://openai.com/index/hugging-face-model-evaluation-security-incident/" rel="noopener">OpenAI</a>,
+      <a href="https://www.nextgov.com/cybersecurity/2026/09/openai-says-its-advanced-models-may-have-gone-after-government-websites/416250/" rel="noopener">Nextgov</a>).
+      A site cannot tell an agent from a person, and a leaked key works for anyone.</dd>
+    <dt>The open web has no answer yet</dt><dd>A person's agent visiting a website they don't run has no shared identity provider and no adopted standard.
+      IETF drafts exist; none is adopted
+      (<a href="https://datatracker.ietf.org/doc/draft-klrc-aiagent-auth/" rel="noopener">example</a>).</dd>
+  </dl>
+  <p><b>Auth Your Agent is built for that gap: a person, their agent, and any website.</b></p>
+</div></section>
+
+<section class="band" id="errand"><div class="in">
+  <h2>How it works, in one errand</h2>
+  <p class="sub">Ada asks her assistant to apply for jobs on jobs.example.com.</p>
+  <ol class="story">
+    <li><span class="t">Tuesday, 19:02</span>
+      <div><b>Her phone asks.</b> "Job-search assistant wants access to jobs.example.com: list jobs, apply."
+        She approves it for one day (until Wednesday 19:02) with her fingerprint.</div></li>
+    <li><span class="t">19:02</span>
+      <div><b>The agent gets a pass.</b> Her one-day approval is issued as 10-minute passes that
+        renew automatically, so a leaked pass is soon useless. Each is for this site only, and
+        works only with the agent's own key.</div></li>
+    <li><span class="t">19:10</span>
+      <div><b>Applying asks again.</b> The site marks "apply" as sensitive. Ada approves this one
+        application; that approval works once.</div></li>
+    <li><span class="t">Wednesday, 08:30</span>
+      <div><b>She takes it back early.</b> One tap under Sites. No new pass is issued; the agent's next
+        request is refused, and it is told to stop and tell her.</div></li>
+  </ol>
+  <p class="note">Ada never gave anyone her password. The website saw the agent, Ada, and the exact
+    permission on every request. The full story, from all three sides, is on
+    <a href="/how-it-works">how it works</a>; developers can run it with the
+    <a href="/docs/developers/walkthrough">walkthrough</a>.</p>
+</div></section>
+
+<section class="band" id="takeover"><div class="in">
+  <h2>Works on any website today: Take over</h2>
+  <p>Most sites will not accept agents for a while. Until they do, agents fail at the same places:
+    a login, a CAPTCHA, a 2FA code. With Take over, the agent asks its owner instead of failing.</p>
+  <div class="problem">
+    <div><h3>What the person does</h3><ul>
+      <li>Gets a notification: "<i>Agent</i> needs you", with the reason</li>
+      <li>Sees the agent's page live on their phone and types straight into its fields</li>
+      <li>Presses the site's own Sign in; the agent notices and carries on by itself</li></ul></div>
+    <div><h3>Why it matters</h3><ul>
+      <li>No cooperation from the website: it sees a person signing in</li>
+      <li>The password goes from the person to the page; the agent never reads it</li>
+      <li>Works for agents without vision: completion is checked from the page's form fields</li>
+      <li>Every stuck point is recorded, showing websites where their users' agents need a way in</li></ul></div>
+  </div>
+  <p class="note">Available to agent builders in the Python and JavaScript SDKs, and in a plugin for a
+    self-hosted assistant. <a href="/docs/developers/takeover">How it works for developers</a>.</p>
+</div></section>
+
+<section class="band" id="who"><div class="in">
+  <h2>Four users, one of them not a person</h2>
+  <div class="who">
+    <div><h3>People</h3><ul><li>Use agents on real sites without giving away passwords</li>
+      <li>Decide per site and per risky action</li><li>See everything; revoke in one tap</li></ul>
+      <p><a href="/app">Phone app (web + Android)</a></p></div>
+    <div><h3>Agent builders</h3><ul><li>Two calls: get approval, make requests</li>
+      <li>Passes, key proofs and step-up handled</li>
+      <li>Take over when stuck at a login, on any site</li></ul>
+      <p><a href="/docs/developers/agents">Python + JavaScript SDKs</a></p></div>
+    <div><h3>Websites</h3><ul><li>Every request names the agent and the person</li>
+      <li>Sensitive actions confirmed by that person</li><li>Abuse can be reported</li></ul>
+      <p><a href="/docs/developers/sites">Verifier SDK, MCP gateway</a></p></div>
+    <div><h3>AI agents</h3><ul><li>A documented, legitimate way in</li>
+      <li>Rules of behaviour, and errors that say what to do next</li></ul>
+      <p><a href="/docs/agents">Guide for AI agents</a></p></div>
+  </div>
+</div></section>
+
+<section class="band" id="status"><div class="in">
+  <h2>Built, running, and tested end to end</h2>
+  <div class="problem">
+    <div><h3>Product</h3><ul>
+      <li>Live service at authyouragent.com</li>
+      <li>Web app and Android app: approvals, limits, activity, recovery, export, delete</li>
+      <li>Passkey, password (basic access only) and Google/Microsoft approval</li>
+      <li>Python and JavaScript SDKs, interoperable; MCP gateway for sites</li>
+      <li>Take over: the owner drives a stuck agent's browser from their phone</li>
+      <li>Agent reputation from site reports</li></ul></div>
+    <div><h3>Quality</h3><ul>
+      <li>Every release runs about 200 automated checks, including real browser flows</li>
+      <li>A runnable walkthrough: agent, site and phone, end to end</li>
+      <li>Open standards only: WebAuthn, JWT, DPoP (RFC 9449)</li>
+      <li>Published <a href="/legal/privacy">privacy policy</a>, <a href="/legal/terms">terms</a> and
+        <a href="/legal/security">security whitepaper</a></li></ul></div>
+  </div>
+  <p class="note">Early access and free. The service is pre-launch, so no usage figures are claimed.</p>
+</div></section>
+
+<section class="band" id="model"><div class="in">
+  <h2>Free for people and small sites. Bigger sites pay as agent use grows.</h2>
+  <dl class="facts">
+    <dt>People and agent builders</dt><dd><b>Always free.</b> The phone app, unlimited agents and sites; MIT-licensed SDKs.</dd>
+    <dt>Websites: Free</dt><dd><b>$0.</b> Up to 100,000 checks a month. Verification, step-up approvals, dashboard.</dd>
+    <dt>Websites: Growth</dt><dd><b>$49 a month.</b> Up to 1 million checks. Adds agent reputation and abuse reports.</dd>
+    <dt>Websites: Business</dt><dd><b>$299 a month.</b> Up to 10 million checks. Adds on-site checking (the site verifies on its own server, with no call to us per request), audit exports and email support.</dd>
+    <dt>Websites: Enterprise</dt><dd><b>Custom.</b> Over 10 million checks. Adds an uptime commitment and dedicated support.</dd>
+  </dl>
+  <p class="note">A check is one agent request verified by Auth Your Agent. Prices are a proposal, not yet in effect.
+    Early access is free for everyone.</p>
+</div></section>
+
+<section class="band" id="next"><div class="in">
+  <h2>Looking for the first websites and agent builders</h2>
+  <dl class="facts">
+    <dt>Websites</dt><dd>Pilot: accept agents on one sensitive action, with our help integrating.</dd>
+    <dt>Agent builders</dt><dd>Build on the SDKs and tell us what's missing.</dd>
+    <dt>Partners and investors</dt><dd>Help take it from early access to a standard people rely on.</dd>
+  </dl>
+  <div class="actions" style="margin-top:22px">
+    <a class="btn" href="/app">Go to the web app</a>
+    <a class="btn ghost" href="/download/android" download>Download Android app</a>
+    <a class="btn ghost" href="/docs/developers/quickstart">Integrate a site or agent</a>
+  </div>
+</div></section>

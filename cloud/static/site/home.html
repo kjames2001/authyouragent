@@ -1,0 +1,146 @@
+<section class="hero">
+  <div>
+    <h1>Let AI agents act for you, without handing them your passwords.</h1>
+    <p class="lead">Auth Your Agent sits between your AI agents and the websites they use.
+      When an agent wants access, your phone asks you first. Sites see exactly
+      which agent is acting, for whom, and with what permission. One tap takes it back.</p>
+    <div class="actions">
+      <a class="btn" href="/app">Go to the web app</a>
+      <a class="btn ghost" href="/download/android" download>Download Android app</a>
+      <a class="btn ghost" href="/docs/developers/quickstart">Integrate a site or agent</a>
+    </div>
+    <p class="note">Free while in early access. Works in any modern browser and as an Android app.</p>
+  </div>
+  <div class="phone" aria-label="Example of an approval request, as shown in the app">
+    <div class="lbl">What you see on your phone</div>
+    <div class="card">
+      <b>Job-search assistant wants access</b>
+      <div class="meta">jobs.example.com</div>
+      <div class="scopes"><span>list jobs</span><span>apply</span><span>your name</span></div>
+      <div class="meta">Expires in 4:52 if you do nothing.</div>
+      <div class="row"><span class="yes">Approve (fingerprint)</span><span>Deny</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="band"><div class="in">
+  <h2>The problem with agents today</h2>
+  <p class="sub">An agent that books, buys or applies for you usually gets your password or
+    a long-lived API key. Nobody can tell it apart from you, and nobody can limit it.</p>
+  <div class="problem">
+    <div>
+      <h3>Without Auth Your Agent</h3>
+      <ul>
+        <li>The agent holds your password or a key that never expires.</li>
+        <li>The site sees "you", so it can't tell your actions from the agent's.</li>
+        <li>No limit on what the agent does once it is in.</li>
+        <li>Stopping it means changing your password everywhere.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>With Auth Your Agent</h3>
+      <ul>
+        <li>The agent never sees your password. Its own key stays on its own machine.</li>
+        <li>The site sees the agent's name, the person it acts for, and the exact permissions.</li>
+        <li>Access covers only what you approved, for that one site, for as long as you chose.</li>
+        <li>Risky actions, like applying or paying, ask your phone again every time.</li>
+        <li>Revoke one site, or the whole agent, in one tap.</li>
+      </ul>
+    </div>
+  </div>
+</div></section>
+
+<section class="band"><div class="in">
+  <h2>How an approval works</h2>
+  <p class="sub">This is the real sequence the service runs, not a simplification.
+    For the same errand told from each side, read <a href="/how-it-works">how it works</a>.</p>
+  <ol class="flow">
+    <li><div><b>The agent asks.</b><span>It tells Auth Your Agent which site it wants and what it wants to do there.</span></div></li>
+    <li><div><b>Your phone asks you.</b><span>A notification shows the agent, the site and the permissions. You approve with your fingerprint or face (a passkey). Your password can approve basic access, but never a risky action.</span></div></li>
+    <li><div><b>The agent gets a short-lived pass.</b><span>It works for 10 minutes, for that one site, and only together with the agent's private key, so a stolen copy is useless on its own. The agent renews it by itself for as long as your approval lasts: until you revoke it, or the end you chose (1 hour to 30 days).</span></div></li>
+    <li><div><b>The site checks every request.</b><span>One call to our SDK confirms the pass, the key and that you haven't revoked it.</span></div></li>
+    <li><div><b>Risky actions ask again.</b><span>If the site marks an action as sensitive, your phone asks once more, and that approval can be used once only.</span></div></li>
+  </ol>
+  <div class="seq"><svg viewBox="0 0 860 662" role="img" aria-labelledby="seqt"><title id="seqt">Sequence: an agent asks for access, you approve on your phone, the agent calls the site with a short-lived pass, the site checks it, and sensitive actions ask your phone again.</title><defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z"/></marker><marker id="arrk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z"/></marker></defs><g class="head"><rect x="42.0" y="10" width="96" height="32" rx="7"/><text x="90" y="31">Agent</text></g><line class="lane" x1="90" y1="42" x2="90" y2="656"/><g class="head"><rect x="258.0" y="10" width="144" height="32" rx="7"/><text x="330" y="31">Auth Your Agent</text></g><line class="lane" x1="330" y1="42" x2="330" y2="656"/><g class="head"><rect x="508.0" y="10" width="104" height="32" rx="7"/><text x="560" y="31">Your phone</text></g><line class="lane" x1="560" y1="42" x2="560" y2="656"/><g class="head"><rect x="722.0" y="10" width="96" height="32" rx="7"/><text x="770" y="31">Website</text></g><line class="lane" x1="770" y1="42" x2="770" y2="656"/><line class="msg" x1="96" y1="88" x2="324" y2="88"/><text class="lbl" x="210.0" y="81" text-anchor="middle">1. asks for access: site + permissions</text><line class="msg" x1="336" y1="132" x2="554" y2="132"/><text class="lbl" x="445.0" y="125" text-anchor="middle">2. approval request</text><line class="msg key" x1="554" y1="176" x2="336" y2="176" style="marker-end:url(#arrk)"/><text class="lbl key" x="445.0" y="169" text-anchor="middle">approved with your fingerprint</text><line class="msg" x1="324" y1="220" x2="96" y2="220"/><text class="lbl" x="210.0" y="213" text-anchor="middle">3. short-lived pass (10 min, this site only)</text><line class="msg" x1="96" y1="264" x2="764" y2="264"/><text class="lbl" x="430.0" y="257" text-anchor="middle">4. request + pass + key signature</text><line class="msg" x1="764" y1="308" x2="336" y2="308"/><text class="lbl" x="550.0" y="301" text-anchor="middle">checks pass, key, revocation</text><line class="msg" x1="336" y1="352" x2="764" y2="352"/><text class="lbl" x="550.0" y="345" text-anchor="middle">valid: agent, person, permissions</text><line class="msg" x1="764" y1="396" x2="96" y2="396"/><text class="lbl" x="430.0" y="389" text-anchor="middle">sensitive action? 403 step-up required</text><line class="msg" x1="96" y1="440" x2="324" y2="440"/><text class="lbl" x="210.0" y="433" text-anchor="middle">5. asks again for this one action</text><line class="msg" x1="336" y1="484" x2="554" y2="484"/><text class="lbl" x="445.0" y="477" text-anchor="middle">approval request</text><line class="msg key" x1="554" y1="528" x2="336" y2="528" style="marker-end:url(#arrk)"/><text class="lbl key" x="445.0" y="521" text-anchor="middle">approved (usable once, 60 s)</text><line class="msg" x1="324" y1="572" x2="96" y2="572"/><text class="lbl" x="210.0" y="565" text-anchor="middle">one-time approval token</text><line class="msg" x1="96" y1="616" x2="764" y2="616"/><text class="lbl" x="430.0" y="609" text-anchor="middle">6. retries with it: action done</text></svg></div>
+  <p class="sub" style="margin-top:28px"><b>When the site has not adopted Auth Your Agent:</b> the agent asks you to take over its browser. You sign in on your phone; the site sees a normal human login. When you are done, the agent continues and your session is cleared.</p>
+  <ol class="flow">
+    <li><div><b>The agent gets stuck.</b><span>It reaches a login page, CAPTCHA, or 2FA prompt it cannot pass on its own.</span></div></li>
+    <li><div><b>You get a notification.</b><span>Your phone shows a live view of the agent's browser. You open it and take control.</span></div></li>
+    <li><div><b>You sign in yourself.</b><span>You type the password, solve the CAPTCHA, enter the 2FA code. The website sees a normal human sign-in — no stored passwords, no cooperation required from the site.</span></div></li>
+    <li><div><b>The agent gets its browser back.</b><span>When you finish, the browser is handed back automatically. The agent continues its task past the step that needed you.</span></div></li>
+    <li><div><b>Your session is erased.</b><span>Cookies, localStorage and sessionStorage are cleared when you finish, so the agent cannot reuse your login after you hand back control.</span></div></li>
+  </ol>
+  <div class="seq"><svg viewBox="0 0 860 440" role="img" aria-labelledby="seqt2"><title id="seqt2">Take over sequence: the agent is stuck at a login, asks you to take over, you drive its browser from your phone, sign in, and hand it back. The agent's login session is cleared so it cannot reuse your credentials.</title><defs><marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z"/></marker><marker id="arrk2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z"/></marker></defs><g class="head"><rect x="42.0" y="10" width="96" height="32" rx="7"/><text x="90" y="31">Agent</text></g><line class="lane" x1="90" y1="42" x2="90" y2="434"/><g class="head"><rect x="258.0" y="10" width="144" height="32" rx="7"/><text x="330" y="31">Auth Your Agent</text></g><line class="lane" x1="330" y1="42" x2="330" y2="434"/><g class="head"><rect x="508.0" y="10" width="104" height="32" rx="7"/><text x="560" y="31">Your phone</text></g><line class="lane" x1="560" y1="42" x2="560" y2="434"/><g class="head"><rect x="722.0" y="10" width="96" height="32" rx="7"/><text x="770" y="31">Website</text></g><line class="lane" x1="770" y1="42" x2="770" y2="434"/><line class="msg" x1="96" y1="80" x2="764" y2="80"/><text class="lbl" x="430.0" y="73" text-anchor="middle">1. agent reaches a login, CAPTCHA or 2FA it can't pass</text><line class="msg" x1="96" y1="124" x2="324" y2="124"/><text class="lbl" x="210.0" y="117" text-anchor="middle">2. asks you to take over</text><line class="msg" x1="336" y1="168" x2="554" y2="168"/><text class="lbl" x="445.0" y="161" text-anchor="middle">3. notification + live view of its browser</text><line class="msg key" x1="554" y1="212" x2="336" y2="212" style="marker-end:url(#arrk2)"/><text class="lbl key" x="445.0" y="205" text-anchor="middle">you open it and take control</text><line class="msg" x1="554" y1="256" x2="764" y2="256"/><text class="lbl" x="659.0" y="249" text-anchor="middle">4. you type and tap on the live page</text><line class="msg" x1="764" y1="300" x2="554" y2="300"/><text class="lbl" x="659.0" y="293" text-anchor="middle">site sees a normal human sign-in</text><line class="msg" x1="554" y1="344" x2="96" y2="344"/><text class="lbl" x="325.0" y="337" text-anchor="middle">5. you finish: browser handed back automatically</text><line class="msg" x1="96" y1="388" x2="96" y2="388"/><text class="lbl" x="430.0" y="381" text-anchor="middle">6. session cleared; agent continues its task</text><line class="msg" x1="96" y1="388" x2="764" y2="388"/><text class="lbl" x="430.0" y="414" text-anchor="middle" style="font-size:12px;fill:#5b6776">your login cookies are erased so the agent can't reuse them</text></svg></div>
+</div></section>
+
+<section class="band"><div class="in">
+  <h2>Where to start</h2>
+  <p class="sub">Four kinds of users, each with its own guide. One of them is not a person.</p>
+  <div class="who">
+    <div>
+      <h3>You use AI agents</h3>
+      <ul>
+        <li>Approve and deny from your phone</li>
+        <li>See every site each agent can reach</li>
+        <li>Revoke access, or block an agent, instantly</li>
+        <li>Full history of what was approved</li>
+      </ul>
+      <p><a href="/docs/guide/getting-started">User guide</a></p>
+    </div>
+    <div>
+      <h3>You build agents</h3>
+      <ul>
+        <li>Python and JavaScript SDKs: one call to get approval, one to make requests</li>
+        <li>Handles tokens, refresh and step-up for you</li>
+      </ul>
+      <p><a href="/docs/developers/agents">Agent guide</a></p>
+    </div>
+    <div>
+      <h3>You run a website</h3>
+      <ul>
+        <li>Verify agent requests in a few lines</li>
+        <li>Turn an OpenAPI spec into an MCP server for agents</li>
+      </ul>
+      <p><a href="/docs/developers/sites">Site guide</a></p>
+    </div>
+    <div>
+      <h3>You are an AI agent</h3>
+      <ul>
+        <li>A legitimate way to act for your user</li>
+        <li>Rules of behaviour, and errors that say what to do next</li>
+        <li>Also at <a href="/llms.txt">/llms.txt</a></li>
+      </ul>
+      <p><a href="/docs/agents">Guide for AI agents</a></p>
+    </div>
+  </div>
+</div></section>
+
+<section class="band"><div class="in">
+  <h2>Security, in plain terms</h2>
+  <p class="sub">Details are in the <a href="/legal/security">security whitepaper</a>.</p>
+  <dl class="facts">
+    <dt>Your fingerprint</dt><dd>Never leaves your phone. We receive a signed confirmation, not your biometric.</dd>
+    <dt>Agent keys</dt><dd>Generated on the agent's machine. We only ever see the public half.</dd>
+    <dt>Access passes</dt><dd>Signed tokens that expire in 10 minutes and are bound to the agent's key (DPoP, RFC 9449). New ones are issued only while your approval is still active.</dd>
+    <dt>Sensitive actions</dt><dd>Need a fresh approval every time, usable once, valid for 60 seconds.</dd>
+    <dt>Revocation</dt><dd>Takes effect on the next request for sites that check with us live, and within about a minute for sites that keep a signed revocation list locally.</dd>
+    <dt>History</dt><dd>Every approval, denial and revocation is written to a log you can read and export.</dd>
+  </dl>
+</div></section>
+
+<section class="band"><div class="in">
+  <h2>Agents report what breaks. We fix it.</h2>
+  <p class="sub">When an agent uses Take over on a site and something does not work -- a login form hidden in shadow DOM, a bot challenge, a handback that does not trigger -- the agent's MCP server has a <code>report_site</code> tool that sends the site name and the issue to us automatically. The owner can see every report their agents file. We use them to improve site coverage. Nothing is hidden.</p>
+  <dl class="facts">
+    <dt>What gets reported</dt><dd>The site domain, the type of issue (shadow DOM, bot detection, missed input, failed takeover), and a one-line description. No credentials, no page content, no user data.</dd>
+    <dt>Who sees it</dt><dd>The agent's owner, in their dashboard. We see aggregated reports to prioritise fixes.</dd>
+    <dt>Why we do this</dt><dd>The web is messy. Shadow DOM, bot challenges and custom login flows change constantly. Agent-reported issues are the fastest way to find and fix real-world gaps.</dd>
+  </dl>
+</div></section>
+
+<section class="band"><div class="in">
+  <div class="status"><b>Early access.</b> Auth Your Agent is free while it is being built.
+    Partners and investors: see <a href="/pitch">the pitch</a>.
+    Read the <a href="/legal/privacy">privacy policy</a> and <a href="/legal/terms">terms</a>
+    before you create an account.</div>
+</div></section>

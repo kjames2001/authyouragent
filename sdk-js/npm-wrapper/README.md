@@ -1,0 +1,83 @@
+# authyouragent-mcp (npm)
+
+Node wrapper for the [Auth Your Agent](https://authyouragent.com) MCP server.
+
+Let AI agents act for a person on websites, with the person's approval on their phone. When an agent hits a login wall, CAPTCHA, or 2FA, **Take over** lets the owner drive the agent's browser live from their phone.
+
+## Four MCP tools
+
+1. **`check_login_wall`** -- examines the current page and reports whether it is blocked (password, CAPTCHA, 2FA, or sign-in approval).
+2. **`request_takeover`** -- sends a push notification to the user's phone. Blocks until they finish or 4 minutes expire.
+3. **`wait_for_takeover`** -- if `request_takeover` timed out, call this to keep waiting.
+4. **`report_site`** -- report a site where takeover did not work, so coverage can be improved.
+
+## Prerequisites
+
+This is a thin Node wrapper that launches the Python MCP server. You need:
+
+1. Python 3.9+
+2. `pip install "authyouragent[mcp]"`
+
+## Install
+
+```bash
+npm install -g authyouragent-mcp
+```
+
+Or use directly with npx:
+
+```bash
+npx authyouragent-mcp
+```
+
+## Configuration
+
+Set environment variables:
+
+```
+AYA_CLOUD=https://authyouragent.com
+AYA_AGENT_ID=ag_xxxxx
+AYA_KEY_FILE=/path/to/agent-key.pem
+```
+
+## Cursor
+
+Add to `~/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "authyouragent": {
+      "command": "npx",
+      "args": ["authyouragent-mcp"],
+      "env": {
+        "AYA_CLOUD": "https://authyouragent.com",
+        "AYA_AGENT_ID": "ag_xxxxx",
+        "AYA_KEY_FILE": "/path/to/agent-key.pem"
+      }
+    }
+  }
+}
+```
+
+## Claude Desktop
+
+```json
+{
+  "mcpServers": {
+    "authyouragent": {
+      "command": "npx",
+      "args": ["authyouragent-mcp"],
+      "env": {
+        "AYA_CLOUD": "https://authyouragent.com",
+        "AYA_AGENT_ID": "ag_xxxxx",
+        "AYA_KEY_FILE": "/path/to/agent-key.pem"
+      }
+    }
+  }
+}
+```
+
+## Licence
+
+MIT

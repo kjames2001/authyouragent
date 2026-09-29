@@ -1,0 +1,35 @@
+{
+  "name": "Auth Your Agent",
+  "description": "Let AI agents act for a person on websites, with the person's approval on their phone. Take over lets the owner drive a stuck agent's browser from their phone.",
+  "url": "https://authyouragent.com",
+  "type": "remote",
+  "transport": "stdio",
+  "categories": ["ai-agents", "authorization", "identity", "browser-automation"],
+  "tools": [
+    {
+      "name": "check_login_wall",
+      "description": "Examine the current page and report whether it is blocked (password, CAPTCHA, 2FA, or sign-in approval)."
+    },
+    {
+      "name": "request_takeover",
+      "description": "Send a push notification to the user's phone. Blocks until they finish or 4 minutes expire. Returns done, cancelled, expired, or agent_left."
+    },
+    {
+      "name": "wait_for_takeover",
+      "description": "If request_takeover timed out, call this to keep waiting."
+    },
+    {
+      "name": "report_site",
+      "description": "Report a site where takeover did not work, so coverage can be improved."
+    }
+  ],
+  "installation": {
+    "command": "pip install \"authyouragent[mcp]\"",
+    "npm": "npm install -g authyouragent-mcp"
+  },
+  "links": {
+    "documentation": "https://authyouragent.com/docs/agents",
+    "homepage": "https://authyouragent.com"
+  },
+  "license": "MIT"
+}

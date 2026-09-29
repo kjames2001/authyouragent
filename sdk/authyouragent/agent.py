@@ -1,0 +1,435 @@
+"""authyouragent.agent — agent-side SDK for the Auth Your Agent cloud (vertical slice).
+
+An agent that wants to act on a user's behalf on a site:
+
+  s = AgentClient(base_url="https://hermes.armadillo-lake.ts.net:8443",
+                  agent_id="ag_xxx", privkey_pem="-----BEGIN PRIVATE KEY-----...")
+  s.ensure_grant("jobboard.example", scopes=["list", "apply"])
+  # → pushes a biometric approval to the user's phone; blocks until answered
+  s.call("jobboard.example", "GET", "https://hermes.armadillo-lake.ts.net:8443/jobboard/list",
+         token=..., dpop=...)
+
+In practice the agent embeds this around its HTTP calls:
+
+  req = s.request("GET", "https://hermes.armadillo-lake.ts.net:8443/jobboard/jobs")
+  # sends Authorization: Bearer <AT> + DPoP header; auto-refreshes tokens;
+  # auto-requests step-up when the site returns 403 stepup_required
+
+Key material: the agent holds its Ed25519/EC P-256 private key; the cloud
+never sees it. The DPoP key IS the agent key (single key, per RFC 9449).
+"""
+
+import json
+import threading
+import time
+
+import httpx
+import jwt as pyjwt
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+
+
+class AgentError(Exception):
+    pass
+
+
+class AgentClient:
+    def __init__(self, base_url, agent_id, privkey_pem, poll_interval=1.5,
+                 timeout=60, verify=True):
+        self.base = base_url.rstrip("/")
+        self.agent_id = agent_id
+        self.key = serialization.load_pem_private_key(
+            privkey_pem.encode() if isinstance(privkey_pem, str) else privkey_pem,
+            password=None)
+        self.pub = self.key.public_key()
+        self.poll_interval = poll_interval
+        self.client = httpx.Client(timeout=timeout, verify=verify)
+        # per-site token cache: an access token is audience-bound (aud=site),
+        # so a token minted for site A must never be sent to site B.
+        self._access_by_site = {}   # site -> (token, exp_float)
+        self._refresh_by_site = {}  # site -> refresh token
+        self._last_site = None
+        self._lock = threading.RLock()
+        self._jwk = {
+            "kty": "EC", "crv": "P-256",
+            "x": b64(self.pub.public_numbers().x.to_bytes(32, "big")),
+            "y": b64(self.pub.public_numbers().y.to_bytes(32, "big")),
+        }
+
+    # ------------------------------------------------ legacy cache accessors
+    # Back-compat for callers/tests that poke `_access` / `_refresh` directly:
+    # reading returns the most-recently-used site's entry; assigning None
+    # clears the cache for ALL sites.
+
+    @property
+    def _access(self):
+        return self._access_by_site.get(self._last_site)
+
+    @_access.setter
+    def _access(self, v):
+        with self._lock:
+            if v is None:
+                self._access_by_site.clear()
+            elif self._last_site is not None:
+                self._access_by_site[self._last_site] = v
+
+    @property
+    def _refresh(self):
+        return self._refresh_by_site.get(self._last_site)
+
+    @_refresh.setter
+    def _refresh(self, v):
+        with self._lock:
+            if v is None:
+                self._refresh_by_site.clear()
+            elif self._last_site is not None:
+                self._refresh_by_site[self._last_site] = v
+
+    def _poll_headers(self):
+        # the cloud only reveals a txn's stepup_token to its own agent: every
+        # poll carries a FRESH short-lived agent JWT (they expire)
+        return {"X-Agent-JWT": self._agent_jwt()}
+
+    # ------------------------------------------------------------ crypto
+
+    def _agent_jwt(self, ttl=300):
+        """Signed statement of agency, verified by the cloud against our pubkey."""
+        now = int(time.time())
+        return pyjwt.encode(
+            {"iss": self.agent_id, "sub": self.agent_id,
+             "iat": now, "exp": now + ttl, "type": "agent"},
+            self.key, algorithm="ES256")
+
+    def _dpop_proof(self, method, url, access_token=None):
+        ath = None
+        if access_token:
+            import hashlib, base64
+            ath = base64.urlsafe_b64encode(
+                hashlib.sha256(access_token.encode()).digest()
+            ).rstrip(b"=").decode()
+        payload = {"htm": method.upper(),
+                   # 'url' for the current cloud, 'htu' (RFC 9449 name)
+                   # for clouds that accept the standard claim
+                   "url": url, "htu": url, "iat": int(time.time()),
+                   "jti": "j_" + _rand()[:12]}
+        if ath:
+            payload["ath"] = ath
+        # RFC 9449: the key (jwk) lives in the DPoP proof's JOSE header.
+        header = {"typ": "dpop+jwt", "alg": "ES256", "jwk": self._jwk}
+        h = b64(json.dumps(header, separators=(",", ":")).encode())
+        p = b64(json.dumps(payload, separators=(",", ":")).encode())
+        signing = (h + "." + p).encode()
+        der = self.key.sign(signing, ec.ECDSA(hashes.SHA256()))
+        # JWS ES256 signatures are raw r||s, 64 bytes (RFC 7518 §3.4), not DER
+        r, s_ = decode_dss_signature(der)
+        return h + "." + p + "." + b64(r.to_bytes(32, "big") + s_.to_bytes(32, "big"))
+
+    # ------------------------------------------------------------ grants
+
+    def ensure_grant(self, site, scopes, wait=True):
+        """Ask the cloud for access to `site`. Pushes approval to the user's
+        phone; if `wait`, blocks until the user approves/denies (max ~5 min).
+        Returns True if the grant is usable."""
+        try:
+            r = self.client.post(f"{self.base}/api/v1/authz-requests", json={
+                "agent_id": self.agent_id, "site": site,
+                "scopes": scopes, "agent_jwt": self._agent_jwt()})
+        except httpx.HTTPError as e:
+            raise AgentError(f"cloud unreachable: {e}")
+        if r.status_code == 403:
+            # The only 403 this endpoint emits is check_agent's
+            # "agent revoked by owner" (409 means "grant already active").
+            # Surface revocation loudly; anything else -> try the token path.
+            detail = ""
+            try:
+                b = r.json()
+                detail = (b.get("detail") if isinstance(b.get("detail"), str)
+                          else b.get("error", "")) or ""
+            except Exception:
+                pass
+            if "revoked" in detail.lower():
+                raise AgentError(f"agent revoked by owner: {detail}")
+            return self._try_token(site)
+        if r.status_code == 409:
+            return True
+        if r.status_code >= 400:
+            raise AgentError(f"authz request failed: {r.status_code} {r.text[:200]}")
+        txn = _txn_id(r)
+        print(f"[authyouragent] approval requested ({txn}) — waiting for phone…")
+        if not wait:
+            return None
+        deadline = time.time() + 330
+        while time.time() < deadline:
+            try:
+                p = self.client.get(f"{self.base}/api/v1/authz-requests/{txn}",
+                                    headers=self._poll_headers())
+            except httpx.HTTPError:
+                time.sleep(self.poll_interval)
+                continue
+            if p.status_code >= 500:
+                # transient server error — keep polling (the phone may still
+                # respond), do not kill the whole flow over one bad poll
+                time.sleep(self.poll_interval)
+                continue
+            if p.status_code == 404:
+                raise AgentError("approval txn vanished from the cloud")
+            try:
+                b = p.json()
+                st = b.get("status", "pending") if isinstance(b, dict) else "pending"
+            except Exception:
+                st = "pending"
+            if st == "approved":
+                print("[authyouragent] approved ✓")
+                return self._try_token(site)
+            if st in ("denied", "expired"):
+                print(f"[authyouragent] {st}")
+                raise AgentError(f"approval {st} by user")
+            time.sleep(self.poll_interval)
+        raise AgentError("approval timed out")
+
+    def _try_token(self, site):
+        try:
+            self._get_access(site)
+            return True
+        except AgentError:
+            return False
+
+    # ------------------------------------------------------------ tokens
+
+    def _get_access(self, site, rotate=True):
+        with self._lock:
+            return self._get_access_locked(site, rotate)
+
+    def _get_access_locked(self, site, rotate=True):
+        # cache entry: self._access_by_site[site] = (access_token, exp_float)
+        self._last_site = site
+        cur = self._access_by_site.get(site)
+        if cur and float(cur[1]) > time.time() + 30:
+            return cur[0]
+        refresh = self._refresh_by_site.get(site)
+        try:
+            if refresh:
+                body = {"agent_id": self.agent_id, "site": site,
+                        "agent_jwt": self._agent_jwt(),
+                        "refresh_token": refresh}
+                r = self.client.post(f"{self.base}/api/v1/token", json=body)
+                # the cloud ROTATES the refresh token on every issuance; a
+                # stale/rotated-away token is a 401 — drop it and retry once
+                # via the initial-approval path (which re-mints the grant's
+                # refresh). A misbehaving agent must not crash on rotation.
+                if r.status_code == 401:
+                    self._refresh_by_site.pop(site, None)
+                    body = {"agent_id": self.agent_id, "site": site,
+                            "agent_jwt": self._agent_jwt()}
+                    r = self.client.post(f"{self.base}/api/v1/token", json=body)
+            else:
+                body = {"agent_id": self.agent_id, "site": site,
+                        "agent_jwt": self._agent_jwt()}
+                r = self.client.post(f"{self.base}/api/v1/token", json=body)
+        except httpx.HTTPError as e:
+            raise AgentError(f"cloud unreachable: {e}")
+        if r.status_code == 403:
+            raise AgentError("no grant — call ensure_grant() first")
+        if r.status_code >= 400:
+            raise AgentError(f"token fetch failed: {r.status_code} {r.text[:200]}")
+        try:
+            d = r.json()
+            at = d["access_token"]
+        except Exception:
+            raise AgentError(f"token response malformed: {r.text[:200]}")
+        exp = None
+        # the token endpoint returns expires_in (seconds); prefer it
+        try:
+            if d.get("expires_in") is not None:
+                exp = time.time() + float(d["expires_in"])
+        except (TypeError, ValueError):
+            exp = None
+        if exp is None:
+            try:
+                claims = pyjwt.decode(at, options={"verify_signature": False})
+                exp = float(claims.get("exp"))
+            except Exception:
+                exp = time.time()
+        self._access_by_site[site] = (at, exp)
+        if d.get("refresh_token"):
+            self._refresh_by_site[site] = d["refresh_token"]
+        else:
+            self._refresh_by_site.pop(site, None)
+        return at
+
+    # ------------------------------------------------------------ calls
+
+    def request(self, method, url, stepup_action=None, site=None, **kwargs):
+        """Perform an HTTP request through Auth Your Agent: attaches Bearer + DPoP,
+        auto-refreshes tokens, and on a 403 'stepup_required' from the site,
+        requests a one-time step-up grant (phone prompt) and retries ONCE.
+        Each attempt mints a FRESH DPoP proof (and a fresh access token if
+        the old one is within 30s of expiry) — reusing a proof from the
+        first attempt 401s after ~2 min (DPoP iat window) or once the
+        access token has rolled.
+
+        `site` is the site id you were granted; it defaults to the URL's
+        host. Pass it when the site is reached at another address (a
+        local test server, a regional API host)."""
+        site = site or url.split("/")[2].split(":")[0]
+        at = self._get_access(site)
+        headers = dict(kwargs.pop("headers", {}))
+        resp = self._do_request(method, url, at, headers, kwargs)
+        if resp.status_code == 403 and stepup_action:
+            try:
+                body = resp.json()
+            except Exception:
+                return resp
+            # tolerate both the flat {"error": ...} and FastAPI's nested
+            # {"detail": {"error": ...}} shapes
+            if not isinstance(body, dict):
+                return resp          # not a step-up signal; surface as-is
+            err_obj = body.get("detail") if isinstance(body.get("detail"), dict) else body
+            if err_obj.get("error") == "stepup_required":
+                st = self._stepup(site, stepup_action)
+                if st:
+                    # retry: fresh token (the old one may have expired
+                    # during the phone wait) + fresh DPoP proof bound to it
+                    headers["X-AuthYourAgent-Stepup"] = st
+                    at2 = self._get_access(site, rotate=False)
+                    return self._do_request(method, url, at2, headers, kwargs)
+        return resp
+
+    def _do_request(self, method, url, at, headers, kwargs):
+        # DPoP: one fresh proof PER request (htm/url/iat/ath all bind to
+        # this exact call — RFC 9449).
+        h = dict(headers)
+        h["Authorization"] = f"Bearer {at}"
+        h["DPoP"] = self._dpop_proof(method, url, at)
+        try:
+            return self.client.request(method, url, headers=h, **kwargs)
+        except httpx.HTTPError as e:
+            raise AgentError(f"request failed: {e}")
+
+    def _stepup(self, site, action):
+        try:
+            r = self.client.post(f"{self.base}/api/v1/stepup", json={
+                "agent_id": self.agent_id, "site": site, "action": action,
+                "agent_jwt": self._agent_jwt()})
+        except httpx.HTTPError as e:
+            print(f"[authyouragent] stepup request failed: {e}")
+            return None
+        if r.status_code >= 400:
+            print(f"[authyouragent] stepup request failed: {r.text}")
+            return None
+        txn = _txn_id(r)
+        print(f"[authyouragent] step-up requested ({txn}) — waiting for phone…")
+        deadline = time.time() + 330
+        while time.time() < deadline:
+            try:
+                p = self.client.get(f"{self.base}/api/v1/authz-requests/{txn}",
+                                    headers=self._poll_headers())
+            except httpx.HTTPError:
+                time.sleep(self.poll_interval)
+                continue
+            if p.status_code >= 500:
+                # transient server error — keep polling (the phone may still
+                # respond), do not kill the whole flow over one bad poll
+                time.sleep(self.poll_interval)
+                continue
+            if p.status_code == 404:
+                return None
+            try:
+                st = p.json()
+            except Exception:
+                st = None
+            if not isinstance(st, dict):
+                time.sleep(self.poll_interval)
+                continue
+            if st.get("status") == "approved" and st.get("stepup_token"):
+                print("[authyouragent] step-up approved ✓")
+                return st["stepup_token"]
+            if st.get("status") in ("denied", "expired"):
+                print(f"[authyouragent] step-up {st.get('status')}")
+                return None
+            time.sleep(self.poll_interval)
+        return None
+
+
+def _txn_id(r):
+    try:
+        b = r.json()
+    except Exception:
+        raise AgentError(f"cloud returned non-JSON: {r.text[:200]}")
+    if not isinstance(b, dict) or not b.get("txn_id"):
+        raise AgentError(f"cloud response missing txn_id: {r.text[:200]}")
+    return b["txn_id"]
+
+
+def _rand(n=16):
+    import secrets
+    return secrets.token_hex(n)
+
+
+def b64(x: bytes) -> str:
+    import base64
+    return base64.urlsafe_b64encode(x).rstrip(b"=").decode()
+
+
+def b64dec(s: str) -> bytes:
+    import base64
+    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+
+def keygen():
+    """§10.1: generate an agent keypair LOCALLY, in the agent runtime.
+    The private key never touches the network. Returns (privkey_pem, pubkey_pem)."""
+    key = ec.generate_private_key(ec.SECP256R1())
+    priv = key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption()).decode()
+    pub = key.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode()
+    return priv, pub
+
+
+def agent_jwk(pubkey_pem: str) -> dict:
+    """Emit the RFC 7515 JWK the PWA posts when registering an agent whose
+    key was generated locally by the agent runtime."""
+    pub = serialization.load_pem_public_key(
+        pubkey_pem.encode() if isinstance(pubkey_pem, str) else pubkey_pem)
+    n = pub.public_numbers()
+    return {"kty": "EC", "crv": "P-256",
+            "x": b64(n.x.to_bytes(32, "big")),
+            "y": b64(n.y.to_bytes(32, "big"))}
+
+# ------------------------------------------------------------ CLI
+#   python -m authyouragent keygen --name "Hermes JARVIS"
+#   -> prints {"agent_key": {...}} ; the agent keeps the privkey, and the
+#      user's phone registers the pubkey with the cloud (cloud never sees
+#      the private key — §10.1).
+
+def _cli_keygen(name):
+    priv, pub = keygen()
+    print(json.dumps({
+        "agent_key": {
+            "name": name,
+            "jwk": agent_jwk(pub),
+            "pubkey_pem": pub,
+            "privkey_pem": priv,
+            "note": ("agent runtime: keep privkey_pem local. "
+                     "Phone/PWA: register jwk (+name) with the cloud; "
+                     "the cloud will return agent_id, which the runtime "
+                     "uses to build its AgentClient."),
+        }
+    }, indent=2))
+
+def _cli_main(argv=None):
+    import argparse
+    ap = argparse.ArgumentParser(prog="authyouragent")
+    ap.add_argument("cmd", choices=["keygen"])
+    ap.add_argument("--name", default="agent")
+    args = ap.parse_args(argv)
+    if args.cmd == "keygen":
+        _cli_keygen(args.name)
+
+
+if __name__ == "__main__":
+    _cli_main()
