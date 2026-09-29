@@ -1,51 +1,79 @@
-.venv/
-data/
-logs/
-__pycache__/
-*.pyc
-mcp_layer/state_*
-mcp_layer/servers/*_mcp.py
-*.tar.gz
-
-# Secrets
+# ── Secrets ──
 *.pem
 *.key
 *.token
 firebase-*.json
 google-services.json
 
-# Build artifacts
+# ── Certs ──
+certs/
+*.crt
+*.key
+
+# ── Build artifacts ──
 *.apk
 *.pptx
 *.pdf
-
-# Node
+*.egg-info/
+sdk/build/
 node_modules/
 
-# Android
-authyouragent-android/app/build/
-authyouragent-android/.gradle/
-authyouragent-android/local.properties
+# ── Python ──
+.venv/
+__pycache__/
+*.pyc
 
-# Database
+# ── Private: server code (not open-sourced) ──
+cloud/main.py
+cloud/site_pages.py
+cloud/takeover.py
+cloud/static/index.html
+cloud/static/takeover.html
+cloud/static/sw.js
+cloud/static/webauthn-bridge.js
+
+# ── Private: infrastructure ──
+caddy/
+prod/
+docker-compose.yml
+slice.caddyfile
+slice.json
+flip_board_prod.sh
+
+# ── Private: internal tests ──
+live_smoke_prod.py
+live_test.py
+test_*.py
+
+# ── Private: MCP layer ──
+mcp_layer/
+
+# ── Private: demos ──
+demo/
+
+# ── Private: internal docs ──
+docs/design-v0.*
+docs/compliance/
+
+# ── Database ──
+data/
 *.db
 *.db-journal
+logs/
 
-# IDE
+# ── Android (private) ──
+authyouragent-android/
+
+# ── IDE ──
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# OS
+# ── OS ──
 .DS_Store
 Thumbs.db
 
-# Backups
+# ── Backups ──
 backups/
 *.tgz
-# Certs and keys
-certs/
-*.crt
-*.key
-*.pem
