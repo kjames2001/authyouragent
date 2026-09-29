@@ -77,3 +77,9 @@ Thumbs.db
 # ── Backups ──
 backups/
 *.tgz
+# Private: scripts and internal files
+scripts/
+run.sh
+docs/pv2-2.png
+cloud/static/legal/market-entry-notes.md
+cloud/static/legal/ropa.md
