@@ -1,8 +1,7 @@
 # Auth Your Agent — Your Rights & How to Exercise Them
 
 **Auth Your Agent** — 2026-09-26
-One page, no forms to fill. Your rights under the **Botswana Data Protection
-Act 2024 (Act 18)** and, for EU/UK users, the **GDPR**.
+One page, no forms to fill. Your rights under the **applicable Data Protection Act 2024 (Act 18)** and, for EU/UK users, the **GDPR**.
 
 ## Your rights
 | Right | What it means at Auth Your Agent | How to exercise it |
@@ -13,7 +12,7 @@ Act 2024 (Act 18)** and, for EU/UK users, the **GDPR**.
 | **Erasure (deletion)** | Delete an agent, or your whole account + data | App → Settings → *Delete account*; backups erase within 30 days |
 | **Portability** | Your account, agents, grants as JSON | App → Settings → *Export my data* |
 | **Objection / restriction** | Ask us to pause processing of a specific field while you decide | Email us — we'll flag the grant read-only |
-| **Complaint** | File with the regulator | **Botswana**: Information and Data Protection Commission (IDPC) · **EU/UK**: your national DPA |
+| **Complaint** | File with the regulator | **Your jurisdiction**: your national data protection authority · **EU/UK**: your national DPA |
 
 ## Timelines
 - We respond to any request **within 30 days** (GDPR: one month, extendable
@@ -23,7 +22,7 @@ Act 2024 (Act 18)** and, for EU/UK users, the **GDPR**.
   must also purge the daily backup chain — we keep 30 days of backups).
 
 ## Biometric data
-You have a specific right around biometric processing (Botswana DPA 2024
+You have a specific right around biometric processing (the applicable DPA
 s. 30; GDPR special-category). At Auth Your Agent: your biometric template lives **on
 your phone** in its secure hardware. We hold a signed assertion, not the
 template. Deleting your account deletes the assertions and your passkey
@@ -33,4 +32,4 @@ system settings.
 ## Contact
 - In-app: Settings → Contact
 - Email: support@authyouragent.com
-- Postal: the operator of authyouragent.com, Gaborone, Botswana
+- Postal: the operator of authyouragent.com, the operator's jurisdiction

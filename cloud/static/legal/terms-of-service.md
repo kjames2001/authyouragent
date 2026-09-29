@@ -74,9 +74,8 @@ no sale, no behavioural tracking.
   your account.
 
 ## 11. Law & disputes
-- **Botswana law** governs (the service is established in Gaborone,
-  Botswana). The Information and Data Protection Commission and Botswana
-  courts are the default forum.
+- **The law of the operator's jurisdiction** governs (the service is established in the operator's jurisdiction). Your national data protection authority.
+Courts of the operator's jurisdiction are the default forum.
 - For users in other jurisdictions, see the **Market Entry Notes** —
   jurisdiction-specific addenda apply (e.g. GDPR for EU/UK users, PIPL for
   PRC users). Those addenda prevail over these general terms on conflict.

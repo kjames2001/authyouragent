@@ -84,7 +84,7 @@ expire (≤15 min) and are then rejected on step-up.
 
 ## 7. Failure & incident handling
 - **72-hour breach notification** to the regulator (and affected users where
-  they're impacted), per Botswana DPA 2024 (and GDPR where applicable).
+  they're impacted), per the applicable DPA (and GDPR where applicable).
 - A compromised **phone** → re-pair / re-register; its old credential stops
   approving. A compromised **cloud** → rotate the signing key via JWKS; held
   DB dumps can't mint or sign assertions.

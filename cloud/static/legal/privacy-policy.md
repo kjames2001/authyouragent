@@ -1,13 +1,13 @@
 # Auth Your Agent Privacy Policy
 
 **Auth Your Agent** — last updated 2026-09-26
-Controller: the operator of authyouragent.com (Gaborone, Botswana)
-Governing law: **Botswana Data Protection Act, Act No. 18 of 2024** (in force 14 January 2025); GDPR where you are in the EEA/UK
+Controller: the operator of authyouragent.com (the operator's jurisdiction)
+Governing law: **the applicable Data Protection Act** (in force 14 January 2025); GDPR where you are in the EEA/UK
 
 ## 1. What Auth Your Agent does
 Auth Your Agent is a free identity service for authorizing AI agents. You (the human) register the software agents you use, and you authorize each agent to act on your behalf on specific websites — approval happens on your phone with your fingerprint/face (a passkey). The websites see that a real, accountable human stood behind the agent, and can revoke access at any time.
 
-## 2. Data we process and why (Botswana DPA 2024 ss. 4–11; GDPR Art. 6)
+## 2. Data we process and why (the applicable DPA ss. 4–11; GDPR Art. 6)
 
 | Data | Purpose | Lawful basis | Retention |
 |---|---|---|---|
@@ -21,15 +21,15 @@ Auth Your Agent is a free identity service for authorizing AI agents. You (the h
 | FCM / web-push subscription tokens | Deliver approval notifications to your phone | Consent (you enable push) | Until disabled |
 
 ### Biometric data — the key fact
-Your fingerprint/face is matched and stored **on your phone's secure hardware** (secure element / TEE). Auth Your Agent receives a **signed assertion**, not your biometric. We never see, store, or process your biometric template. (Botswana DPA 2024 s. 30; GDPR "biometric data" recitals 51–53.)
+Your fingerprint/face is matched and stored **on your phone's secure hardware** (secure element / TEE). Auth Your Agent receives a **signed assertion**, not your biometric. We never see, store, or process your biometric template. (the applicable DPA s. 30; GDPR "biometric data" recitals 51–53.)
 
 ## 3. The user-info disclosure (Auth Your Agent's scope model)
 A website declares which of your fields it wants (e.g. name, email, phone). Your **phone approval is the explicit consent** for exactly that set, and it is shown on the approval card. Those values are snapshotted into a signed, short-lived token the site reads. You can **narrow** what a site sees at any time (removing a field takes effect on the agent's next token); adding a field back requires a new phone approval. A site that never asked for your phone learns nothing about it.
 
-## 4. Cross-border transfer (Botswana DPA 2024 Part XIV, s. 74)
-Auth Your Agent is established in **Botswana**. Its systems run on our own servers in the **United States** (racknerd VPS, `authyouragent.com`). This is a transfer to a third country. Our safeguards:
+## 4. Cross-border transfer (the applicable DPA Part XIV, s. 74)
+Auth Your Agent is established in the operator's jurisdiction. Its systems run on our own servers in the **United States** (racknerd VPS, `authyouragent.com`). This is a transfer to a third country. Our safeguards:
 
-- **Local copy (s.74 proviso):** a copy of your personal data transferred abroad is kept in Botswana (an encrypted replica of our database on Botswana-based storage) for the period of processing.
+- **Local copy (s.74 proviso):** a copy of your personal data transferred abroad is kept in the operator's jurisdiction (an encrypted replica of our database on locally-based storage) for the period of processing.
 - **Explicit, informed consent (s.78(a))** given at signup and per user-info grant, captured in this policy and the approval flow.
 
 We keep our databases on our own, self-hosted, auditable infrastructure — we are not a reseller and do not share your data with third parties for their marketing.
@@ -43,7 +43,7 @@ We keep our databases on our own, self-hosted, auditable infrastructure — we a
 - Audit log: 24 months active, then anonymized/archived.
 - Revoked grants: retained as a record of your consent history, linked to the agent, until account deletion.
 
-## 6. Your rights (Botswana DPA 2024 Part VIII; GDPR Chapter III)
+## 6. Your rights (the applicable DPA Part VIII; GDPR Chapter III)
 You may, at any time, free of charge:
 1. **Access** a copy of your personal data (email, phone, agents, grants, audit log, consent records) — via the Auth Your Agent app ("Export my data") or by request.
 2. **Rectify** inaccurate data.
@@ -55,7 +55,7 @@ You may, at any time, free of charge:
 
 To exercise a right: use the Auth Your Agent app, or email **privacy@authyouragent.com**. We respond within **30 days** (GDPR: 1 month).
 
-## 7. Security (Botswana DPA 2024 Part XI)
+## 7. Security (the applicable DPA Part XI)
 - TLS everywhere; HSTS at the edge (Let's Encrypt).
 - DPoP key-bound tokens (RFC 9449) — a stolen token is useless without the agent's key.
 - Short-lived, audience-scoped access tokens (≤ 15 min); revocable refresh tokens.
@@ -77,4 +77,4 @@ We do not sell your personal data. The audit log and consent records are our pro
 Material changes to this policy are announced in the app before they take effect. Consent for user-info is always per-grant and re-asked when a site wants more.
 
 ---
-*This policy is the controller's record under s. 48 transparency duties and supports the s. 60 Record of Processing Activities. Regulatory contact: Information and Data Protection Commission, Botswana.*
+*This policy is the controller's record under applicable transparency duties and supports the the applicable Record of Processing Activities. Regulatory contact: your national data protection authority.*
