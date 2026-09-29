@@ -44,3 +44,8 @@ Thumbs.db
 # Backups
 backups/
 *.tgz
+# Certs and keys
+certs/
+*.crt
+*.key
+*.pem
