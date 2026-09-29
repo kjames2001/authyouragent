@@ -1,0 +1,26 @@
+# Smithery configuration for Auth Your Agent MCP server
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      AYA_CLOUD:
+        type: string
+        default: https://authyouragent.com
+        description: "Auth Your Agent cloud URL"
+      AYA_AGENT_ID:
+        type: string
+        description: "Your agent ID (ag_xxxxx)"
+      AYA_KEY_FILE:
+        type: string
+        description: "Path to your agent private key file"
+    required:
+      - AYA_AGENT_ID
+      - AYA_KEY_FILE
+  command: authyouragent-mcp
+  env:
+    AYA_CLOUD: "{{config.AYA_CLOUD}}"
+    AYA_AGENT_ID: "{{config.AYA_AGENT_ID}}"
+    AYA_KEY_FILE: "{{config.AYA_KEY_FILE}}"
+description: "Let AI agents act for a person on websites, with the person's approval on their phone. Take over lets the owner drive a stuck agent's browser from their phone."
+name: authyouragent
