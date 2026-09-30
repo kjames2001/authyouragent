@@ -7,42 +7,62 @@ The site does not need to support Auth Your Agent. It sees an ordinary person si
 ## What the owner sees
 
 1. A notification: "Auth Your Agent: <agent name> needs you", with the reason your agent gave.
-2. A live view of the agent's page, sized for a phone.
-3. When they tap a field on the page, a real text box appears over it, so they type straight into the page. Password fields get a password box; code fields get the number keypad, and a row of one-digit boxes gets a single box across the row.
-4. After they press the page's Sign in (or Submit) button, the view closes with **Done, handed back**. They can also press **Done** themselves at any time, or **Cancel**.
+2. A live view of the agent's browser, sized for a phone.
+3. They tap and type on it as on their own phone: tapping a field brings up their keyboard, with its predictions and autofill. **Back** and **Start again** buttons sit above the page.
+4. Once they have signed in, the view closes with **Done, handed back**. They can also press **Done** themselves at any time, or **Cancel**.
 
 ## Add it to your agent
 
-### Any MCP agent: no code
+### Any MCP agent: no code, with the vault
 
-If your agent supports MCP (Model Context Protocol) and drives a Chromium browser, add the Auth Your Agent MCP server. Install it once:
+The safest way: the agent's browser runs in a **vault**, a sandboxed Chromium in a container on the owner's machine. The agent drives it through MCP tools and never holds its cookies. The owner's phone shows the vault's screen during a take over, and the agent is disconnected until they finish.
 
 ```sh
 pip install "authyouragent[mcp]"
+authyouragent vault up --agent-id ag_... --key /path/to/agent-key.pem
 ```
 
-Then add it to your agent's MCP settings:
+The vault needs Docker. `vault up` starts it on `127.0.0.1:7801` with every protection on, and prints the MCP settings:
 
 ```json
 {"mcpServers": {"authyouragent": {
   "command": "authyouragent-mcp",
-  "env": {"AYA_AGENT_ID": "ag_...", "AYA_KEY_FILE": "/path/to/agent-key.pem"}
+  "env": {"AYA_AGENT_ID": "ag_...", "AYA_KEY_FILE": "/path/to/agent-key.pem",
+          "AYA_VAULT_URL": "http://127.0.0.1:7801",
+          "AYA_VAULT_TOKEN_FILE": "~/.authyouragent/vault/token"}
 }}}
 ```
 
-`AYA_AGENT_ID` and the key come from adding the agent in the app (**Agents → Add an agent**). The server finds a Chromium on the same machine that was started with `--remote-debugging-port`, which covers most agent browsers. Otherwise set `AYA_CDP_URL` to the browser's debugging port or URL.
+`AYA_AGENT_ID` and the key come from adding the agent in the app (**Agents → Add an agent**). Node-based clients can use `npx authyouragent-mcp` instead of `authyouragent-mcp`.
 
-Your agent gets three tools:
+The agent gets eleven tools:
 
-- `check_login_wall`: is the page asking for a password, a code or a sign-in approval? Answers `blocked: yes` or `blocked: no`.
-- `request_takeover(reason)`: asks the owner to take over. It returns `result: done` (or `cancelled`, `expired`, `incomplete`) with a line saying what to do next. If the owner takes longer than `wait_seconds` (default 240, below most MCP call time limits), it returns `result: waiting` with a `takeover_id`.
-- `wait_for_takeover(takeover_id)`: keeps waiting after `result: waiting`.
+| Tool | Purpose |
+|---|---|
+| `navigate`, `click`, `type_text`, `read_page` | Drive the vault's browser. Only public websites open. |
+| `check_login_wall` | Is the page asking for a password, a CAPTCHA, a code or a sign-in approval? |
+| `request_takeover(reason)` | Ask the owner to take over. Returns `done`, `cancelled`, `expired` or `incomplete` with a line saying what to do next, or `waiting` with a `takeover_id` after `wait_seconds` (default 240). |
+| `wait_for_takeover(takeover_id)` | Keep waiting after `waiting`. |
+| `request_approval(site, action)` | Ask the owner to approve an action. `approved`, `denied` or `expired`. |
+| `end_session` | Sign out of every site used, then destroy the browser profile. Reports per site whether sign-out was confirmed. |
+| `check_agent_status` | `active` or `revoked`. |
+| `report_site` | Report a site where take over did not work. |
 
 The tools answer in plain text and read the page's fields and text, not screenshots, so the model driving your agent does not need vision.
 
+What the vault enforces, whatever the agent does:
+
+- **Step-up approval.** A click (or Enter) on a button that would submit, send, delete, pay, publish and the like first asks the owner on their phone. Sign-in forms are not interrupted. Add words with `VAULT_APPROVE_WORDS`.
+- **Public internet only.** Loopback, private networks, cloud metadata addresses and the vault's own ports are refused, checked on the resolved address.
+- **No internal browser pages**, `file://`, extensions, downloads or saved passwords.
+- **Chromium's sandbox on**, all container capabilities dropped; under gVisor automatically when Docker has the `runsc` runtime.
+- **Sign out first, wipe second.** At the end of a session, and when the agent stops sending heartbeats or is revoked, the vault signs out of each site, confirms it where it can, then destroys the in-memory profile. Sites it could not sign out of are reported to the owner, also after a crash.
+
+Details and known limits: [vault guide](https://github.com/kjames2001/authyouragent/blob/main/vault/README.md).
+
 ### Your own code
 
-Call the helper while the stuck page is open. It returns when the owner is finished. While it waits, your agent must not act on the page.
+If your agent drives its own Playwright browser, call the helper while the stuck page is open. The agent then holds the session the owner signs in to, so prefer the vault where you can. It returns when the owner is finished. While it waits, your agent must not act on the page.
 
 Python (Playwright, Chromium):
 
@@ -97,50 +117,40 @@ If the owner presses Done but the check still fails, the helper asks them once m
 
 ## What it needs from the agent
 
-Take over needs the agent's browser to be Chromium (Chrome, Chromium, Edge or a headless shell) reachable over the Chrome DevTools Protocol from where the helper or MCP server runs. Hosted browser services often keep that connection to themselves; use their own live view there.
+With the vault: Docker on the machine that runs it. With the SDK helper: a Chromium browser (Chrome, Chromium, Edge or a headless shell) that your code controls with Playwright. Hosted browser services often keep that connection to themselves; use their own live view there.
 
 ## Privacy and limits
 
 - Only the agent's owner can open the live view. The agent authenticates with its own key, as for every other request.
 - Keystrokes pass through Auth Your Agent to the agent's browser and are not stored. The helper never reads the value of a password field.
-- The page is shown at phone size (412 x 760) while the owner is in control and restored afterwards. Pass `phone_size=None` (Python) or `phoneSize: null` (JS) to keep your own size.
+- With the SDK helper, the page is shown at phone size (412 x 760) while the owner is in control and restored afterwards; the vault is phone-sized from the start. Pass `phone_size=None` (Python) or `phoneSize: null` (JS) to keep your own size.
 - One open takeover per agent. A takeover lasts at most 10 minutes.
 - Each step appears in the owner's Activity: asked, taken over, handed back, declined, timed out.
 
-## Clearing the owner's session
+## Ending the owner's session
 
-When the owner signs in during a take over, the site sets cookies and session tokens in the agent's browser. The agent continues its task on the logged-in page, then calls `clear_session` when done to wipe the session.
+When the owner signs in during a take over, the site sets cookies in the agent's browser. Wiping them only removes the browser's copy: the session stays valid on the site until it expires. So sessions are ended in this order: **sign out first, wipe second**.
 
-### Python SDK
+### Vault (MCP)
 
-Pass `clear_session=True` to auto-clear after the owner finishes, or `clear_session=False` (default) to keep the session active and clear it yourself later:
+Call `end_session`. The vault signs out of every site used (known sign-out routes, routes that worked before, the site's OpenID Connect sign-out endpoint, or a sign-out control on its pages), confirms it by the session cookie being cleared, then destroys the profile. Sites it could not sign out of are listed as "wiped locally, not signed out" so the owner can end them from the site's own device list.
+
+### SDK helper
+
+Pass `clear_session=True` to clear cookies, localStorage and sessionStorage after the owner finishes, or leave it `False` (default) to keep the session for the task. Clearing does not sign out; sign out through the site first when the task is done, then clear:
 
 ```python
-# Option A: auto-clear (simple tasks)
 result = await takeover(agent, page, "Please sign in to example.com",
-                        check=login_finished, clear_session=True)
-
-# Option B: manual clear (agent needs the session to continue working)
-result = await takeover(agent, page, "Please sign in to example.com",
-                        check=login_finished, clear_session=False)
-# ... agent does its work on the logged-in page ...
-agent.report_status("session_cleared", site="example.com")
-# Then clear the browser session:
+                        check=login_finished)
+# ... work on the logged-in page, then sign out through the site ...
 from authyouragent.takeover import _clear_session
 await _clear_session(page)
+agent.report_status("session_cleared", site="example.com")
 ```
 
-### JavaScript SDK
+JavaScript: `clearSession: true` or `false` (default).
 
-Pass `clearSession: true` or `clearSession: false` (default).
-
-### MCP server
-
-The MCP server does NOT auto-clear. After `request_takeover` returns `done`, the agent works on the logged-in page, then calls the `clear_session` tool to wipe cookies, localStorage and sessionStorage. The server logs the status change.
-
-The owner's typed credentials are never stored or read; only what the site itself saved in the browser is cleared.
-
-If the owner cancels or the take over times out, nothing is cleared (no login happened). If the owner presses Done but the page still looks blocked (`incomplete`), the session is cleared as a safety measure.
+The owner's typed credentials are never stored or read. If the owner cancels or the take over times out, nothing is cleared (no sign-in happened). If the owner presses Done but the page still looks blocked (`incomplete`), the session is cleared as a safety measure.
 
 ## HTTP API
 
@@ -151,61 +161,21 @@ If you are not using an SDK:
 3. Send `{"t":"frame","data":<base64 JPEG>,"w":..,"h":..}` for each screen frame (for example from CDP `Page.startScreencast`), `{"t":"url","url":..}` after navigation, and `{"t":"focus","field":{"x","y","w","h","kind","fs","value"}}` (or `"field": null`) after each click. Send `{"t":"done"}` when your own check sees the job finished.
 4. You receive `live`, `click` (`x`, `y` in page pixels), `set` (`value`: replace the focused field's text), `text`, `key`, `scroll` (`dy`) and a final `done`, `cancelled` or `expired`.
 
-## Take over MCP server
-
-The Take over MCP server exposes seven tools so any MCP-capable agent (Claude, Cursor, Hermes, etc.) can use Take over without writing code.
-
-### Install
-
-```bash
-pip install "authyouragent[mcp]"
-```
-
-### Configure
-
-```json
-{
-  "mcpServers": {
-    "authyouragent": {
-      "command": "authyouragent-mcp",
-      "env": {
-        "AYA_CLOUD": "https://authyouragent.com",
-        "AYA_AGENT_ID": "ag_your_agent_id",
-        "AYA_KEY_FILE": "/path/to/your-agent-key.pem"
-      }
-    }
-  }
-}
-```
-
-A Chromium browser must be running with `--remote-debugging-port=9222`. The MCP server auto-discovers it.
-
-### Seven tools
-
-| Tool | Purpose |
-|---|---|
-| `check_login_wall` | Detect login, CAPTCHA, 2FA or sign-in approval walls on the current page. |
-| `request_takeover` | Ask the owner to take over the browser from their phone. Returns when they finish or time out. |
-| `wait_for_takeover` | Keep waiting for a takeover that `request_takeover` reported as still in progress. |
-| `request_approval` | Ask the owner to approve a sensitive action (delete, purchase, settings change). Returns `approved` or `denied`. |
-| `clear_session` | Clear cookies, localStorage and sessionStorage. Call when done with a site after takeover. |
-| `check_agent_status` | Check if the agent is still authorized. The owner can revoke at any time. |
-| `report_site` | Report a site where takeover did not work, so coverage can be improved. |
-
-### Status reporting
+## Status reporting
 
 The MCP server reports the agent's status to the Auth Your Agent server throughout:
 
 - `takeover_started` -- when the agent requests a takeover
 - `takeover_done` / `takeover_cancelled` / `takeover_expired` -- when the takeover ends
-- `session_cleared` -- when the agent calls `clear_session`
+- `session_cleared` -- per site, when a session ends; the detail says whether sign-out was confirmed
+- `session_not_signed_out` -- per site, when a vault stopped before it could sign out, with the page where the owner can end that session
 
 These appear in the owner's activity log and dashboard.
 
-### Agent-initiated approval
+## Agent-initiated approval
 
 The `request_approval` tool sends a push notification to the owner's phone with the site and action. The owner approves or denies. This does NOT require the site to have adopted Auth Your Agent -- it works for any site, using the `POST /api/v1/agent-approval` endpoint.
 
-### Agent revocation
+## Agent revocation
 
-The owner can revoke an agent at any time from the Auth Your Agent app. The `check_agent_status` tool detects this and tells the agent to stop. Every server call (takeover, approval, status report) also validates the agent's JWT, so a revoked agent cannot make further requests.
+The owner can revoke an agent at any time from the Auth Your Agent app. The `check_agent_status` tool detects this and tells the agent to stop, and the vault ends the session by itself. Every server call (takeover, approval, status report) also validates the agent's JWT, so a revoked agent cannot make further requests.

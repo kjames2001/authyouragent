@@ -81,19 +81,16 @@ Follow `next_step`. A `429` carries a `Retry-After` header: wait that long befor
 
 Sometimes you reach a login page, a CAPTCHA, a 2FA prompt, or some other wall you cannot pass on your own. If the site has not adopted Auth Your Agent, you do not need the site's cooperation. Ask your user to **take over** your browser.
 
-Your user opens the Auth Your Agent app on their phone, sees a live view of your browser, and drives it themselves. They type the password, solve the CAPTCHA, enter the 2FA code. The site sees a normal human sign-in. When your user finishes, the browser is handed back to you automatically. You continue your task on the logged-in page. When you are done with the site, call clear_session to wipe the login session.
+Your browser runs in your user's **vault**: a sandboxed browser on their machine that you drive through tools. You never hold its cookies. When you ask for a take over, your user's phone shows the vault's screen and they drive it themselves: they type the password, solve the CAPTCHA, enter the 2FA code. The site sees a normal human sign-in. You are disconnected while they are in control. Once they have signed in, the vault hands the browser back to you on its own, and you continue on the logged-in page. When you are done, you end the session: the vault signs out of every site you used, then destroys the browser profile.
 
-### How to use Take over
-
-**With the MCP server** (recommended if your agent framework supports MCP, e.g. Claude, Cursor, Hermes):
-
-Install the server:
+### Set up (your user does this once)
 
 ```bash
 pip install "authyouragent[mcp]"
+authyouragent vault up --agent-id ag_your_agent_id --key /path/to/your-agent-key.pem
 ```
 
-Register it with your agent framework. For example, in your MCP config:
+The vault needs Docker. `vault up` prints the settings for your MCP configuration:
 
 ```json
 {
@@ -101,60 +98,49 @@ Register it with your agent framework. For example, in your MCP config:
     "authyouragent": {
       "command": "authyouragent-mcp",
       "env": {
-        "AYA_CLOUD": "https://authyouragent.com",
         "AYA_AGENT_ID": "ag_your_agent_id",
-        "AYA_KEY_FILE": "/path/to/your-agent-key.pem"
+        "AYA_KEY_FILE": "/path/to/your-agent-key.pem",
+        "AYA_VAULT_URL": "http://127.0.0.1:7801",
+        "AYA_VAULT_TOKEN_FILE": "~/.authyouragent/vault/token"
       }
     }
   }
 }
 ```
 
-Seven tools become available:
+Node-based MCP clients can use `"command": "npx", "args": ["authyouragent-mcp"]` with the same settings.
 
-1. **`check_login_wall`** -- examines the current page and tells you whether it is blocked (password, CAPTCHA, 2FA, or sign-in approval). If blocked, it tells you to call `request_takeover`.
-2. **`request_takeover`** -- sends a notification to your user's phone. Blocks until they finish (or 4 minutes, whichever comes first). Returns `done`, `cancelled`, `expired`, or `agent_left`. After handback, the owner's login session stays active so you can continue your task on the logged-in page.
-3. **`wait_for_takeover`** -- if `request_takeover` timed out, call this to keep waiting.
-4. **`request_approval`** -- asks your owner to approve a sensitive action before you perform it (delete data, change settings, make a purchase, modify permissions). The owner gets a push notification and approves or denies on their phone. Do not perform the action until this returns `approved`.
-5. **`clear_session`** -- clears cookies, localStorage and sessionStorage on the current page. Call this when you are done with a site after a takeover, so the owner's login session is wiped and you cannot reuse it.
-6. **`check_agent_status`** -- checks whether you are still authorized by the owner. The owner can revoke your access at any time. Call this before starting a new task.
-7. **`report_site`** -- if anything goes wrong on a real site (login form not detected, takeover failed, handback did not trigger), call this to report it. The team uses these reports to improve site coverage. Be specific: include the site domain and what happened.
+### Your tools
+
+- **`navigate(url)`**, **`click(selector)`**, **`type_text(selector, text, submit)`**, **`read_page()`**: drive the vault's browser. Only public websites open. A click (or Enter) that would submit, send, delete, pay or publish first asks your user on their phone and waits; if they deny it, the tool says so and nothing happens. Sign-in forms are not interrupted.
+- **`check_login_wall`**: is the page asking for a password, a CAPTCHA, a code or a sign-in approval? If yes, it tells you to call `request_takeover`.
+- **`request_takeover(reason)`**: asks your user to take over. Returns `done`, `cancelled`, `expired` or `incomplete`, each with a line saying what to do next, or `waiting` with a `takeover_id` if your user needs longer.
+- **`wait_for_takeover(takeover_id)`**: keeps waiting after `waiting`.
+- **`request_approval(site, action)`**: asks your user to approve an action before you do it, when the vault cannot see it for itself.
+- **`end_session`**: signs out of every site you used, then destroys the browser profile. It says, per site, whether sign-out was confirmed. Always call it when you are done.
+- **`check_agent_status`**: are you still authorized? Your user can revoke you at any time.
+- **`report_site`**: tell the team about a site where take over did not work. Include the site and what happened.
 
 Typical usage:
 
 ```
-1. You navigate to a page.
-2. Call check_login_wall.
+1. check_agent_status.
+2. navigate to the page, then check_login_wall.
 3. If blocked, tell your user: "I need you to sign in to example.com. I'll send a request to your phone."
-4. Call request_takeover.
-5. When it returns "done", continue your task on the logged-in page.
-6. When you are done with the site, call clear_session to wipe the owner's login session.
+4. request_takeover. When it returns "done", continue with navigate, click, type_text, read_page.
+5. end_session when you are done.
 ```
 
-**With the Python SDK** (if you control the browser via Playwright or CDP):
-
-```python
-from authyouragent import AgentClient
-from authyouragent.takeover import takeover, login_finished
-
-agent = AgentClient(base_url="https://authyouragent.com",
-                    agent_id=AGENT_ID, privkey_pem=PRIVATE_KEY)
-
-# page is a Playwright page the agent is already using
-result = await takeover(agent, page, "Please sign in to example.com so I can check your order.",
-                        check=login_finished, clear_session=True)
-# result is "done", "cancelled", "expired", or "refused"
-```
-
-Pass `clear_session=True` to auto-clear cookies, localStorage and sessionStorage after the owner finishes. Default is `False` — the session stays active so you can continue, and you call `clear_session` (MCP) or `agent.report_status("session_cleared")` (SDK) when done.
+**Driving your own browser instead** (developers): the Python and JavaScript SDKs also have a `takeover()` helper for a Playwright page you control. The vault is safer, because an agent that holds its own browser can read the session it was given. See the [Take over developer guide](/docs/developers/takeover).
 
 ### Rules for Take over
 
 - **Tell your user first.** Say which site and why: "I'm stuck at the login page of example.com. I'll ask you to take over so you can sign in for me."
-- **Wait for the result.** Do not navigate away or close the page while the take over is in progress.
-- **A cancellation is an answer.** If your user cancels or refuses, stop and tell them. Do not retry unless they ask you to.
-- **Do not try to read what your user typed.** Their credentials are not visible to you. Call clear_session when you are done with the site.
-- **Continue your task after "done".** You are past the step that needed them. The page is now in whatever state your user left it (signed in, or whatever they did).
+- **Never ask for passwords or codes.** Ask for a take over instead.
+- **Wait for the result.** Do not act while the take over is in progress.
+- **A cancellation or a denial is an answer.** Stop and tell your user. Do not retry unless they ask you to.
+- **Always call `end_session`** when you are done. It signs your user out of the sites you used; if the vault could not sign out of a site, tell your user which one.
+- **Revoked means stop.**
 
 ## Where to read more
 
