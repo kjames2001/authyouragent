@@ -1,35 +1,73 @@
 {
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "maintainers": [
+    "kjames2001"
+  ],
   "name": "Auth Your Agent",
-  "description": "Let AI agents act for a person on websites, with the person's approval on their phone. Take over lets the owner drive a stuck agent's browser from their phone.",
+  "description": "Let AI agents act for a person on websites, with the person's approval on their phone. The agent's browser runs in a sandboxed vault it cannot read into; when a site asks for a password, CAPTCHA or 2FA, the owner takes over from their phone.",
   "url": "https://authyouragent.com",
-  "type": "remote",
+  "type": "local",
   "transport": "stdio",
-  "categories": ["ai-agents", "authorization", "identity", "browser-automation"],
-  "tools": [
-    {
-      "name": "check_login_wall",
-      "description": "Examine the current page and report whether it is blocked (password, CAPTCHA, 2FA, or sign-in approval)."
-    },
-    {
-      "name": "request_takeover",
-      "description": "Send a push notification to the user's phone. Blocks until they finish or 4 minutes expire. Returns done, cancelled, expired, or agent_left."
-    },
-    {
-      "name": "wait_for_takeover",
-      "description": "If request_takeover timed out, call this to keep waiting."
-    },
-    {
-      "name": "report_site",
-      "description": "Report a site where takeover did not work, so coverage can be improved."
-    }
+  "categories": [
+    "ai-agents",
+    "authorization",
+    "identity",
+    "browser-automation"
   ],
   "installation": {
-    "command": "pip install \"authyouragent[mcp]\"",
-    "npm": "npm install -g authyouragent-mcp"
+    "command": "pip install \"authyouragent[mcp]\" && authyouragent vault up --agent-id ag_... --key <agent key file>",
+    "npm": "npx authyouragent-mcp"
   },
   "links": {
     "documentation": "https://authyouragent.com/docs/agents",
-    "homepage": "https://authyouragent.com"
+    "homepage": "https://authyouragent.com",
+    "source": "https://github.com/kjames2001/authyouragent"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "tools": [
+    {
+      "name": "navigate",
+      "description": "Open a public website in the vault's browser."
+    },
+    {
+      "name": "click",
+      "description": "Click an element. Clicks that submit, send, delete, pay or publish ask the owner's phone first."
+    },
+    {
+      "name": "type_text",
+      "description": "Type into a form field. Never used for the owner's passwords or codes."
+    },
+    {
+      "name": "read_page",
+      "description": "Read the page's URL, title and visible text (no screenshot needed)."
+    },
+    {
+      "name": "check_login_wall",
+      "description": "Report whether the page is blocked by a sign-in, CAPTCHA, one-time code or sign-in approval."
+    },
+    {
+      "name": "request_takeover",
+      "description": "Ask the owner to take over the browser from their phone. Returns done, cancelled, expired, incomplete, or waiting."
+    },
+    {
+      "name": "wait_for_takeover",
+      "description": "Keep waiting for a take over that request_takeover reported as still waiting."
+    },
+    {
+      "name": "end_session",
+      "description": "Sign out of every site used, then destroy the browser profile."
+    },
+    {
+      "name": "request_approval",
+      "description": "Ask the owner to approve a sensitive action. Returns approved, denied or expired."
+    },
+    {
+      "name": "check_agent_status",
+      "description": "Check whether the agent is still authorized. The owner can revoke it at any time."
+    },
+    {
+      "name": "report_site",
+      "description": "Report a site where take over did not work correctly."
+    }
+  ]
 }
