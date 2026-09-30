@@ -83,3 +83,6 @@ run.sh
 docs/pv2-2.png
 cloud/static/legal/market-entry-notes.md
 cloud/static/legal/ropa.md
+tests-private/
+sdk/dist/
+sdk-js/node_modules/
