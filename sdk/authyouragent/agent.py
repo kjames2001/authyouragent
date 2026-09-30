@@ -2,16 +2,16 @@
 
 An agent that wants to act on a user's behalf on a site:
 
-  s = AgentClient(base_url="https://hermes.armadillo-lake.ts.net:8443",
+  s = AgentClient(base_url="https://authyouragent.com",
                   agent_id="ag_xxx", privkey_pem="-----BEGIN PRIVATE KEY-----...")
   s.ensure_grant("jobboard.example", scopes=["list", "apply"])
   # → pushes a biometric approval to the user's phone; blocks until answered
-  s.call("jobboard.example", "GET", "https://hermes.armadillo-lake.ts.net:8443/jobboard/list",
+  s.call("jobboard.example", "GET", "https://jobs.example.com/list",
          token=..., dpop=...)
 
 In practice the agent embeds this around its HTTP calls:
 
-  req = s.request("GET", "https://hermes.armadillo-lake.ts.net:8443/jobboard/jobs")
+  req = s.request("GET", "https://jobs.example.com/jobs")
   # sends Authorization: Bearer <AT> + DPoP header; auto-refreshes tokens;
   # auto-requests step-up when the site returns 403 stepup_required
 
@@ -19,6 +19,7 @@ Key material: the agent holds its Ed25519/EC P-256 private key; the cloud
 never sees it. The DPoP key IS the agent key (single key, per RFC 9449).
 """
 
+import sys
 import json
 import threading
 import time
@@ -458,8 +459,12 @@ def _cli_keygen(name):
     }, indent=2))
 
 def _cli_main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["vault"]:
+        from .vault_cli import main as vault_main
+        return vault_main(argv[1:])
     import argparse
-    ap = argparse.ArgumentParser(prog="authyouragent")
+    ap = argparse.ArgumentParser(prog="authyouragent", epilog="also: authyouragent vault up|down|status|env")
     ap.add_argument("cmd", choices=["keygen"])
     ap.add_argument("--name", default="agent")
     args = ap.parse_args(argv)

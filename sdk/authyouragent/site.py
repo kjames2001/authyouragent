@@ -5,7 +5,7 @@ styles are supported; both call the same cloud verify endpoint:
 
   1. SDK middleware (pulled trust):
 
-     site = SiteVerifier(base_url="https://hermes.armadillo-lake.ts.net:8443")
+     site = SiteVerifier(base_url="https://authyouragent.com")
 
      @app.post("/jobs/{job_id}/apply")
      def apply(job_id, req):

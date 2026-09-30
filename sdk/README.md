@@ -5,7 +5,7 @@ SDK for [Auth Your Agent](https://authyouragent.com): let AI agents act for a pe
 
 - `AgentClient`: an agent asks for access, then calls sites with a short-lived pass and a fresh DPoP proof (RFC 9449) on every request.
 - `SiteVerifier`: a website checks each call in one line.
-- **Take over**: when an agent hits a login wall, CAPTCHA, or 2FA, the owner drives the agent's browser live from their phone. Four MCP tools: `check_login_wall`, `request_takeover`, `wait_for_takeover`, `report_site`.
+- **Browser vault**: the agent's browser runs in a container it cannot read into. When a site asks for a password, a CAPTCHA or 2FA, the owner takes over from their phone; clicks that commit something wait for the owner's approval.
 
 Python 3.9+. Depends on `httpx`, `pyjwt`, `cryptography`.
 
@@ -13,44 +13,46 @@ Full documentation: https://authyouragent.com/docs/developers/quickstart
 
 ## Install
 
+You need Python 3.9+ and Docker.
+
 ```
 pip install "authyouragent[mcp]"
+authyouragent vault up --agent-id ag_xxxxx --key /path/to/agent-key.pem
 ```
 
-This installs the SDK plus the MCP server (with Take over support).
+`vault up` starts the browser vault: the browser your agent uses, in a
+container on your machine. The agent drives it through the vault and never
+gets its cookies. It prints the `env` block for your MCP client. See
+[vault/README.md](https://github.com/kjames2001/authyouragent/blob/main/vault/README.md)
+for what protects what, and the known limits.
 
-For just the SDK without MCP:
-
-```
-pip install authyouragent
-```
-
-For Take over support (Playwright + websockets):
-
-```
-pip install "authyouragent[takeover]"
-```
+For just the SDK (no browser, no MCP): `pip install authyouragent`.
 
 ## MCP server
 
-The `authyouragent-mcp` command starts an MCP server with seven tools:
+The `authyouragent-mcp` command starts an MCP server with eleven tools:
 
-1. **`check_login_wall`** -- examines the current page and reports whether it is blocked (password, CAPTCHA, 2FA, or sign-in approval).
-2. **`request_takeover`** -- sends a push notification to the user's phone. Blocks until they finish or 4 minutes expire. Returns `done`, `cancelled`, `expired`, or `agent_left`. After handback, the login session stays active so the agent can continue.
-3. **`wait_for_takeover`** -- if `request_takeover` timed out, call this to keep waiting.
-4. **`request_approval`** -- asks the owner to approve a sensitive action (delete, purchase, settings change) before the agent performs it.
-5. **`clear_session`** -- clears cookies, localStorage and sessionStorage. Call when done with a site after takeover.
-6. **`check_agent_status`** -- checks whether the agent is still authorized. The owner can revoke at any time.
-7. **`report_site`** -- report a site where takeover did not work, so coverage can be improved.
+- **Browser:** `navigate`, `click`, `type_text`, `read_page`. Clicks that
+  submit, send, delete, pay or publish wait for your approval on your phone.
+- **`check_login_wall`**: is the page asking for a password, a code or a
+  sign-in approval?
+- **`request_takeover`** / **`wait_for_takeover`**: you take over the browser
+  from your phone. The agent is disconnected until you finish, and the vault
+  hands back by itself once you have signed in.
+- **`request_approval`**: ask you to approve an action the vault cannot see.
+- **`end_session`**: sign out of every site used, then destroy the browser
+  profile. Always called at the end.
+- **`check_agent_status`**: is the agent still authorized? You can revoke it
+  at any time.
+- **`report_site`**: report a site where take over did not work.
 
 ### Configuration
 
-Set these environment variables:
-
 ```
-AYA_CLOUD=https://authyouragent.com
 AYA_AGENT_ID=ag_xxxxx
 AYA_KEY_FILE=/path/to/agent-key.pem
+AYA_VAULT_URL=http://127.0.0.1:7801
+AYA_VAULT_TOKEN_FILE=~/.authyouragent/vault/token
 ```
 
 ### Hermes
@@ -61,12 +63,15 @@ mcp:
     enabled: true
     command: authyouragent-mcp
     env:
-      AYA_CLOUD: "https://authyouragent.com"
       AYA_AGENT_ID: "ag_xxxxx"
       AYA_KEY_FILE: "/path/to/agent-key.pem"
+      AYA_VAULT_URL: "http://127.0.0.1:7801"
+      AYA_VAULT_TOKEN_FILE: "~/.authyouragent/vault/token"
 ```
 
-### Claude Desktop
+### Claude Desktop / Cursor
+
+Claude Desktop: `claude_desktop_config.json`. Cursor: `~/.cursor/mcp.json`.
 
 ```json
 {
@@ -74,28 +79,10 @@ mcp:
     "authyouragent": {
       "command": "authyouragent-mcp",
       "env": {
-        "AYA_CLOUD": "https://authyouragent.com",
         "AYA_AGENT_ID": "ag_xxxxx",
-        "AYA_KEY_FILE": "/path/to/agent-key.pem"
-      }
-    }
-  }
-}
-```
-
-### Cursor
-
-Add to `~/.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "authyouragent": {
-      "command": "authyouragent-mcp",
-      "env": {
-        "AYA_CLOUD": "https://authyouragent.com",
-        "AYA_AGENT_ID": "ag_xxxxx",
-        "AYA_KEY_FILE": "/path/to/agent-key.pem"
+        "AYA_KEY_FILE": "/path/to/agent-key.pem",
+        "AYA_VAULT_URL": "http://127.0.0.1:7801",
+        "AYA_VAULT_TOKEN_FILE": "~/.authyouragent/vault/token"
       }
     }
   }

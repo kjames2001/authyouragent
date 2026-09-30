@@ -1,0 +1,11 @@
+# The vault image needs only sdk/ and vault/.
+*
+!sdk/
+!vault/
+sdk/build/
+sdk/**/__pycache__/
+sdk/*.egg-info/
+vault/**/__pycache__/
+**/*.pem
+**/*.key
+**/*.token

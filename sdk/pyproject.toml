@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "authyouragent"
-version = "0.2.0"
+version = "0.3.0"
 description = "Auth Your Agent SDK: let AI agents act for a user on websites, with the user's approval on their phone."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -17,7 +17,7 @@ keywords = ["ai-agents", "authorization", "dpop", "webauthn", "identity", "mcp",
 
 [project.optional-dependencies]
 takeover = ["websockets>=12"]
-mcp = ["websockets>=12", "mcp>=1.2", "playwright>=1.40"]
+mcp = ["mcp>=1.2"]
 
 [project.urls]
 Homepage = "https://authyouragent.com"
@@ -29,3 +29,6 @@ authyouragent-mcp = "authyouragent.mcp_server:main"
 
 [tool.setuptools]
 packages = ["authyouragent"]
+
+[tool.setuptools.package-data]
+authyouragent = ["vault_seccomp.json"]
