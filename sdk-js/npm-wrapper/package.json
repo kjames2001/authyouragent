@@ -1,12 +1,13 @@
 {
   "name": "authyouragent-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Auth Your Agent MCP server: let AI agents act for a person on websites, with the person's approval on their phone. Take over lets the owner drive a stuck agent's browser from their phone.",
   "license": "MIT",
   "homepage": "https://authyouragent.com",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kjames2001/authyouragent"
+    "url": "git+https://github.com/kjames2001/authyouragent.git",
+    "directory": "sdk-js/npm-wrapper"
   },
   "keywords": [
     "mcp",

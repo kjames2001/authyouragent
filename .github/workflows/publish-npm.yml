@@ -1,0 +1,34 @@
+# Publish the npm packages with trusted publishing (no token stored).
+# Trigger: push a tag like `js-v0.3.0`. The tag must match both package.json versions.
+# Each package must already exist on npm with this workflow set as its trusted publisher.
+name: Publish npm packages
+
+on:
+  push:
+    tags: ["js-v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      id-token: write     # trusted publishing + provenance
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - name: Check the tag matches both versions
+        run: |
+          for p in sdk-js/package.json sdk-js/npm-wrapper/package.json; do
+            v=$(node -p "require('./$p').version")
+            [ "js-v$v" = "$GITHUB_REF_NAME" ] || { echo "$p: tag $GITHUB_REF_NAME != version $v"; exit 1; }
+          done
+      - name: Publish the SDK
+        working-directory: sdk-js
+        run: npm publish --access public
+      - name: Publish the MCP wrapper
+        working-directory: sdk-js/npm-wrapper
+        run: npm publish --access public

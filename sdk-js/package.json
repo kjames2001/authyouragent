@@ -1,7 +1,12 @@
 {
   "name": "authyouragent",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Auth Your Agent SDK: let AI agents act for a person on websites, with the person's approval on their phone.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kjames2001/authyouragent.git",
+    "directory": "sdk-js"
+  },
   "type": "module",
   "main": "./src/index.js",
   "types": "./src/index.d.ts",
@@ -15,14 +20,31 @@
       "default": "./src/takeover.js"
     }
   },
-  "peerDependencies": { "ws": ">=8" },
-  "peerDependenciesMeta": { "ws": { "optional": true } },
-  "files": ["src", "README.md"],
-  "engines": { "node": ">=18" },
+  "peerDependencies": {
+    "ws": ">=8"
+  },
+  "peerDependenciesMeta": {
+    "ws": {
+      "optional": true
+    }
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "test": "node --test test/*.test.js"
   },
-  "keywords": ["ai-agents", "authorization", "dpop", "webauthn", "identity"],
+  "keywords": [
+    "ai-agents",
+    "authorization",
+    "dpop",
+    "webauthn",
+    "identity"
+  ],
   "homepage": "https://authyouragent.com/docs/developers/quickstart",
   "license": "MIT"
 }
