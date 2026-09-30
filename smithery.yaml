@@ -1,4 +1,5 @@
-# Smithery configuration for Auth Your Agent MCP server
+# Smithery configuration for the Auth Your Agent MCP server (stdio).
+# The browser vault runs separately: `authyouragent vault up` (see vault/README.md).
 startCommand:
   type: stdio
   configSchema:
@@ -14,6 +15,14 @@ startCommand:
       AYA_KEY_FILE:
         type: string
         description: "Path to your agent private key file"
+      AYA_VAULT_URL:
+        type: string
+        default: http://127.0.0.1:7801
+        description: "Where `authyouragent vault up` runs the vault"
+      AYA_VAULT_TOKEN_FILE:
+        type: string
+        default: ~/.authyouragent/vault/token
+        description: "The vault's access token file (created by `vault up`)"
     required:
       - AYA_AGENT_ID
       - AYA_KEY_FILE
@@ -22,5 +31,7 @@ startCommand:
     AYA_CLOUD: "{{config.AYA_CLOUD}}"
     AYA_AGENT_ID: "{{config.AYA_AGENT_ID}}"
     AYA_KEY_FILE: "{{config.AYA_KEY_FILE}}"
-description: "Let AI agents act for a person on websites, with the person's approval on their phone. Take over lets the owner drive a stuck agent's browser from their phone."
+    AYA_VAULT_URL: "{{config.AYA_VAULT_URL}}"
+    AYA_VAULT_TOKEN_FILE: "{{config.AYA_VAULT_TOKEN_FILE}}"
+description: "Let AI agents act for a person on websites, with the person's approval on their phone. The agent drives a sandboxed browser vault it cannot read into; when a site asks for a password, CAPTCHA or 2FA, the owner takes over from their phone."
 name: authyouragent

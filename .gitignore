@@ -86,3 +86,6 @@ cloud/static/legal/ropa.md
 tests-private/
 sdk/dist/
 sdk-js/node_modules
+
+# pitch deck sources (kept locally, not part of the MCP server)
+docs/pitch/
