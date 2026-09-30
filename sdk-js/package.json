@@ -1,6 +1,6 @@
 {
   "name": "authyouragent",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Auth Your Agent SDK: let AI agents act for a person on websites, with the person's approval on their phone.",
   "repository": {
     "type": "git",
