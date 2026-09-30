@@ -7,6 +7,9 @@ SCREEN=$(python3 -c "
 w,h=map(int,'$SIZE'.split('x')); s=float('$SCALE')
 if w<500: w,h=500,round(h*500/w)   # Chromium's minimum window width
 print(f'{round(w*s)}x{round(h*s)}')")
+# A container restart (host reboot, crash) keeps /tmp, so Xvfb would find its
+# old lock and refuse to start. Nothing else uses display :0 in this container.
+rm -f /tmp/.X0-lock /tmp/.X11-unix/X0
 Xvfb :0 -screen 0 "${SCREEN}x24" -nolisten tcp &
 export DISPLAY=:0
 exec python3 /app/broker.py
