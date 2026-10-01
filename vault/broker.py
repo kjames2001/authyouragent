@@ -32,7 +32,7 @@ import shutil
 import tempfile
 import time
 import uuid
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 from aiohttp import ClientSession, ClientTimeout, web
 from playwright.async_api import async_playwright
@@ -162,14 +162,28 @@ def _sweep_profiles():
             shutil.rmtree(os.path.join(PROFILE_ROOT, name), ignore_errors=True)
 
 
-AUTH_PATH = re.compile(r"sign.?in|sign.?up|log.?in|/auth|oauth|/sso|saml|/session|two.?factor|/2fa|mfa|verify|challenge|consent|authorize", re.I)
+# A sign-in step is recognised by a whole part of the address ("/login",
+# "/sessions/two-factor", "/oauth2/v2.0/authorize", "/login.php"), never by
+# text inside a longer name: "/kjames2001/authyouragent" or "/authors/jane"
+# are ordinary pages.
+AUTH_WORD = (r"log.?in|log.?on|sign.?in|sign.?up|oauth2?|auth|authn|authenticate|authori[sz]e|authori[sz]ation|"
+             r"sso|saml2?|sessions?|two.?factor|2fa|mfa|otp|totp|verify|verification|challenge|consent")
+# a whole segment, optionally with a file ending ("login.php"), or words joined
+# by - or _ that are all sign-in words ("mfa-otp-challenge", "sign_in")
+AUTH_SEGMENT = re.compile(rf"(({AUTH_WORD})([-_]({AUTH_WORD}))*)(\.[a-z]{{2,5}})?", re.I)
 AUTH_HOST = re.compile(r"^(accounts|login|auth|signin|sso|id|identity|appleid|secure)\.", re.I)
 SETTLE_S = 2.0
 
 
 def _is_auth_step(url):
     u = urlparse(url)
-    return bool(AUTH_HOST.match(u.hostname or "") or AUTH_PATH.search(u.path + "?" + u.query))
+    if AUTH_HOST.match(u.hostname or ""):
+        return True
+    if any(AUTH_SEGMENT.fullmatch(s) for s in u.path.split("/") if s):
+        return True
+    # "index.php?action=login" style pages (not search terms: "?q=login")
+    return any(k.lower() in ("action", "do", "mode", "step", "page", "view", "act") and AUTH_SEGMENT.fullmatch(v)
+               for k, v in parse_qsl(u.query))
 
 
 async def _open_pages():
