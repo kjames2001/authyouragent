@@ -113,6 +113,7 @@ Node-based MCP clients can use `"command": "npx", "args": ["authyouragent-mcp"]`
 ### Your tools
 
 - **`navigate(url)`**, **`click(selector)`**, **`type_text(selector, text, submit)`**, **`read_page()`**: drive the vault's browser. Only public websites open; a local or private address returns "blocked by the vault". A click (or Enter) that submits a form, or whose button says create, send, save, delete, pay and the like, first asks your user on their phone and waits; so does any other click that makes the page send data to the site. If they deny it, the tool returns an error and nothing happens. Search boxes and sign-in steps are not interrupted. If the vault is not running, the first browser tool starts it; the very first start downloads about 500 MB and may answer "the browser vault is starting": call the tool again in a minute.
+- **`list_secrets`**, **`fill_secret(selector, name, field)`**: sign-ins your user has shared from their password manager. `list_secrets` shows names, sites and fields, never values. `fill_secret` types a `username`, `password` or `totp` code into a field; you never see it. It works only on the item's own site and only for the right kind of field. Use it before asking for a take over when an item for the site exists.
 - **`check_login_wall`**: is the page asking for a password, a CAPTCHA, a code or a sign-in approval? If yes, it tells you to call `request_takeover`.
 - **`request_takeover(reason)`**: asks your user to take over. Returns `done`, `cancelled`, `expired` or `incomplete`, each with a line saying what to do next, or `waiting` with a `takeover_id` if your user needs longer.
 - **`wait_for_takeover(takeover_id)`**: keeps waiting after `waiting`.
@@ -126,8 +127,9 @@ Typical usage:
 ```
 1. check_agent_status.
 2. navigate to the page, then check_login_wall.
-3. If blocked, tell your user: "I need you to sign in to example.com. I'll send a request to your phone."
-4. request_takeover. When it returns "done", continue with navigate, click, type_text, read_page.
+3. If blocked and list_secrets has an item for the site: fill_secret the username and password, click Sign in, fill_secret the totp if asked.
+   Otherwise tell your user: "I need you to sign in to example.com. I'll send a request to your phone."
+4. request_takeover if still blocked. When it returns "done", continue with navigate, click, type_text, read_page.
 5. end_session when you are done.
 ```
 
@@ -136,7 +138,7 @@ Typical usage:
 ### Rules for Take over
 
 - **Tell your user first.** Say which site and why: "I'm stuck at the login page of example.com. I'll ask you to take over so you can sign in for me."
-- **Never ask for passwords or codes.** Ask for a take over instead.
+- **Never ask for passwords or codes.** Use `fill_secret` if your user shared the sign-in, otherwise ask for a take over.
 - **Wait for the result.** Do not act while the take over is in progress.
 - **A cancellation or a denial is an answer.** Stop and tell your user. Do not retry unless they ask you to.
 - **Always call `end_session`** when you are done. It signs your user out of the sites you used; if the vault could not sign out of a site, tell your user which one.
