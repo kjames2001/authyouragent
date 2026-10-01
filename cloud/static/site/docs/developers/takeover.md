@@ -22,7 +22,7 @@ pip install "authyouragent[mcp]"
 authyouragent vault up --agent-id ag_... --key /path/to/agent-key.pem
 ```
 
-The vault needs Docker. `vault up` starts it on `127.0.0.1:7801` with every protection on, and prints the MCP settings:
+The vault needs Docker. `vault up` starts it on `127.0.0.1:7801` with every protection on, and prints the MCP settings. (If you skip `vault up`, the MCP server starts the vault itself the first time the agent needs the browser; `AYA_VAULT_AUTOSTART=0` turns that off.)
 
 ```json
 {"mcpServers": {"authyouragent": {
@@ -52,7 +52,7 @@ The tools answer in plain text and read the page's fields and text, not screensh
 
 What the vault enforces, whatever the agent does:
 
-- **Step-up approval.** A click (or Enter) that submits a form, or on a button that says create, send, save, delete, pay, publish and the like, first asks the owner on their phone, showing the button's words. Search boxes and sign-in steps are not interrupted; "Authorize" and "Allow" on a sign-in page still ask. Add words with `VAULT_APPROVE_WORDS`.
+- **Step-up approval.** A click (or Enter) that submits a form, or on a button that says create, send, save, delete, pay, publish and the like, first asks the owner on their phone, showing the button's words. Any other click that makes the page write to the site within 2 seconds (a scripted POST, PUT, PATCH, DELETE or GraphQL mutation) is held until the owner approves. Search boxes and sign-in steps are not interrupted; "Authorize" and "Allow" on a sign-in page still ask. Add words with `VAULT_APPROVE_WORDS`.
 - **Public internet only.** Loopback, private networks, cloud metadata addresses and the vault's own ports are refused, checked on the resolved address.
 - **No internal browser pages**, `file://`, extensions, downloads or saved passwords.
 - **Chromium's sandbox on**, all container capabilities dropped; under gVisor automatically when Docker has the `runsc` runtime.

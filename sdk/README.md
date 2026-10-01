@@ -22,7 +22,9 @@ authyouragent vault up --agent-id ag_xxxxx --key /path/to/agent-key.pem
 
 `vault up` starts the browser vault: the browser your agent uses, in a
 container on your machine. The agent drives it through the vault and never
-gets its cookies. It prints the `env` block for your MCP client. See
+gets its cookies. It prints the `env` block for your MCP client. If you skip
+it, the MCP server starts the vault itself the first time the agent needs the
+browser (`AYA_VAULT_AUTOSTART=0` turns that off). See
 [vault/README.md](https://github.com/kjames2001/authyouragent/blob/main/vault/README.md)
 for what protects what, and the known limits.
 

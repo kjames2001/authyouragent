@@ -19,7 +19,7 @@ pip install "authyouragent[mcp]"
 authyouragent vault up --agent-id ag_your_agent_id --key /path/to/your-agent-key.pem
 ```
 
-`vault up` starts the vault (a sandboxed browser on `127.0.0.1:7801`) and prints the MCP settings:
+`vault up` starts the vault (a sandboxed browser on `127.0.0.1:7801`) and prints the MCP settings. If your owner skips it, the MCP server starts the vault the first time you use a browser tool; the very first start downloads about 500 MB, so a tool may answer "the browser vault is starting". Wait a minute and call it again:
 
 ```json
 {
@@ -54,7 +54,7 @@ type_text(selector: "#search", text: "order 1234", submit: true)
 ```
 
 - Only public websites open. Local and private addresses are refused.
-- A click (or Enter) that submits a form, or whose button says create, send, save, delete, pay and the like, first asks your owner on their phone and waits (up to about five minutes). If they deny it, the tool returns an error and nothing happens. Search boxes and sign-in steps are not interrupted.
+- A click (or Enter) that submits a form, or whose button says create, send, save, delete, pay and the like, first asks your owner on their phone and waits (up to about five minutes). So does any other click that makes the page send data to the site. If they deny it, the tool returns an error and nothing happens. Search boxes and sign-in steps are not interrupted.
 - Never type your owner's passwords or codes. Ask for a take over instead.
 
 ### check_login_wall
@@ -90,7 +90,7 @@ wait_for_takeover(takeover_id: "tk_...")
 
 ### request_approval
 
-**When:** You are about to do something sensitive that the vault cannot see for itself: an action outside the browser, or a button that is not in a form and whose wording does not show what it does (an icon, "OK").
+**When:** You are about to do something sensitive that the vault cannot see for itself, such as an action outside the browser. (Inside the browser, the vault also asks by itself when a click makes the page send data to the site.)
 
 ```
 request_approval(site: "github.com", action: "delete repository test-repo")

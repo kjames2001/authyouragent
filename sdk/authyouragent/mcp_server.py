@@ -17,6 +17,8 @@ Environment:
   AYA_CLOUD             default https://authyouragent.com
   AYA_VAULT_URL         the vault broker (default http://127.0.0.1:7801)
   AYA_VAULT_TOKEN_FILE  file holding the vault's bearer token (or AYA_VAULT_TOKEN)
+  AYA_VAULT_AUTOSTART   default 1: start the local vault (Docker) on first use if
+                        it is not running. Set 0 to manage it with `authyouragent vault`.
 
 Tools: navigate, click, type_text, read_page, check_login_wall, request_takeover,
        wait_for_takeover, request_approval, end_session, check_agent_status,
@@ -30,6 +32,8 @@ import os
 import re
 import sys
 import time
+from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
@@ -44,11 +48,13 @@ DEFAULT_CLOUD = "https://authyouragent.com"
 WAIT_DEFAULT = 240          # stay under common MCP client call timeouts (300s)
 WAIT_MAX = 290
 HEARTBEAT_S = 20
+AUTOSTART_WAIT = 120        # the first start downloads the image (~500 MB)
 
 mcp = FastMCP("authyouragent")
 _agent = None
 _vault = None
 _hb = None
+_starting = None            # the background task starting the vault, if any
 
 
 def _log(*a):
@@ -67,6 +73,46 @@ def _get_agent():
     return _agent
 
 
+class NoVaultToken(RuntimeError):
+    pass
+
+
+def _autostart_ok():
+    """Start the vault ourselves only when it is the local one `vault up` would
+    create: default address, and the token file it writes (or none set)."""
+    if os.environ.get("AYA_VAULT_AUTOSTART", "1").strip().lower() in ("0", "false", "no", "off"):
+        return False
+    if os.environ.get("AYA_VAULT_TOKEN"):
+        return False
+    u = urlparse(os.environ.get("AYA_VAULT_URL", "http://127.0.0.1:7801"))
+    if u.hostname not in ("127.0.0.1", "localhost") or u.port != 7801:
+        return False
+    from . import vault_cli
+    tf = os.environ.get("AYA_VAULT_TOKEN_FILE")
+    return not tf or Path(tf).expanduser().resolve() == (vault_cli.HOME / "token").resolve()
+
+
+async def _ensure_vault():
+    """Start the local vault in the background and wait for it, up to
+    AUTOSTART_WAIT. If it is still starting, say so; the next call waits again."""
+    global _starting, _vault
+    from . import vault_cli
+    if _starting is None or (_starting.done() and (_starting.cancelled() or _starting.exception())):
+        _log("the browser vault is not running: starting it")
+        _starting = asyncio.create_task(asyncio.to_thread(
+            vault_cli.start, os.environ.get("AYA_AGENT_ID"), os.environ.get("AYA_KEY_FILE"),
+            cloud=os.environ.get("AYA_CLOUD", DEFAULT_CLOUD), log=_log))
+    done, _ = await asyncio.wait({_starting}, timeout=AUTOSTART_WAIT)
+    if not done:
+        raise RuntimeError("the browser vault is starting (the first start downloads about 500 MB). "
+                           "Call the tool again in a minute.")
+    if _starting.exception():
+        raise RuntimeError(f"could not start the browser vault: {_starting.exception()}")
+    if _vault is not None:          # the token may be new: connect again
+        await _vault.aclose()
+        _vault = None
+
+
 def _vault_client():
     global _vault
     if _vault is None:
@@ -79,7 +125,7 @@ def _vault_client():
             if os.path.exists(default):
                 token = open(default).read().strip()
         if not token:
-            raise RuntimeError("no vault token: run `authyouragent vault up`, or set AYA_VAULT_TOKEN_FILE")
+            raise NoVaultToken("no vault token: run `authyouragent vault up`, or set AYA_VAULT_TOKEN_FILE")
         _vault = httpx.AsyncClient(base_url=os.environ.get("AYA_VAULT_URL", "http://127.0.0.1:7801"),
                                    headers={"Authorization": f"Bearer {token}"},
                                    timeout=httpx.Timeout(60, read=WAIT_MAX + 30))
@@ -101,10 +147,21 @@ async def _call(method, path, **kw):
     global _hb
     if _hb is None or _hb.done():
         _hb = asyncio.create_task(_heartbeat())
-    try:
-        r = await _vault_client().request(method, path, **kw)
-    except httpx.HTTPError as e:
-        raise RuntimeError(f"cannot reach the browser vault ({type(e).__name__}); is it running?")
+    if _starting is not None and not _starting.done():
+        await _ensure_vault()       # a start is under way: wait for it, never race it
+    for attempt in (1, 2):
+        try:
+            r = await _vault_client().request(method, path, **kw)
+            break
+        except (httpx.ConnectError, NoVaultToken) as e:
+            if attempt == 2 or not _autostart_ok():
+                if isinstance(e, NoVaultToken):
+                    raise
+                raise RuntimeError("cannot reach the browser vault (not running). "
+                                   "Start it with `authyouragent vault up`.")
+            await _ensure_vault()
+        except httpx.HTTPError as e:
+            raise RuntimeError(f"cannot reach the browser vault ({type(e).__name__}); is it running?")
     data = r.json()
     if r.status_code == 409:
         raise RuntimeError(data.get("detail", "busy"))

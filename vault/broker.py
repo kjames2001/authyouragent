@@ -735,6 +735,67 @@ class NotApproved(Exception):
     pass
 
 
+# A click the page and button do not show as committing can still send data
+# from a script. While such a click runs, requests that write to the site are
+# held until the owner decides. Not held: reads, beacons, analytics endpoints,
+# read-only GraphQL, and other sites (on most pages those are analytics).
+WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+TELEMETRY = re.compile(r"/(collect|stats|telemetry|analytics|metrics|beacon|events?|log|logs|logging|"
+                       r"track(ing)?|rum|csp-report|report-uri|_private/browser)(/|$|\?)|\bgen_204\b", re.I)
+WATCH_S = 2.0               # how long after a click a scripted write is caught
+
+
+def _is_write(req, page_site):
+    if req.method.upper() not in WRITE_METHODS or req.resource_type in ("ping", "beacon"):
+        return False
+    u = urlparse(req.url)
+    if _site(u.hostname) != page_site or TELEMETRY.search(u.path):
+        return False
+    if re.search(r"graphql", u.path, re.I):
+        body = req.post_data or ""
+        return bool(re.search(r"\bmutation\b", body))
+    return True
+
+
+async def _watched(page, label, act):
+    """Run `act()`; hold scripted writes to the site that start within WATCH_S
+    and ask the owner once for all of them."""
+    site = _site(urlparse(page.url).hostname)
+    decision = None                      # future: "approved" / other
+    held = asyncio.Event()
+
+    async def handler(route, req):
+        nonlocal decision
+        if not _is_write(req, site):
+            return await route.fallback()
+        if decision is None:
+            decision = asyncio.get_running_loop().create_future()
+            held.set()
+        result = await decision
+        if result == "approved":
+            await route.fallback()
+        else:
+            await route.abort("blockedbyclient")
+
+    await page.route("**/*", handler)
+    try:
+        await act()
+        try:
+            await asyncio.wait_for(held.wait(), WATCH_S)
+        except asyncio.TimeoutError:
+            return
+        what = f"{label or 'button'} (sends data to the site)"
+        result = await _approve(page, what)
+        decision.set_result(result)
+        if result != "approved":
+            raise NotApproved(f"the owner did not approve '{what}' ({result}); "
+                              "the page's request was blocked")
+    finally:
+        if decision is not None and not decision.done():
+            decision.set_result("cancelled")
+        await page.unroute("**/*", handler)
+
+
 async def _guarded(page, selector, label_of, act, submits_form):
     """Run `act()` only after the owner approves, if the target commits something."""
     info = await page.locator(selector).first.evaluate(TARGET_JS)
@@ -749,7 +810,11 @@ async def _guarded(page, selector, label_of, act, submits_form):
         result = await _approve(page, label)
         if result != "approved":
             raise NotApproved(f"the owner did not approve '{label}' ({result})")
-    await act()
+        return await act()
+    if sign_in or info["searchForm"] or _is_auth_step(page.url):
+        return await act()
+    # Not shown as committing: watch what the click actually sends.
+    await _watched(page, label, act)
 
 
 async def click(request):

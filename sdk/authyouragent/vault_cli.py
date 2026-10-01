@@ -34,9 +34,12 @@ PORT = 7801
 VAULT_UID = 10001
 
 
+class VaultError(RuntimeError):
+    """Starting or reaching the vault failed; the message says why."""
+
+
 def _die(msg) -> NoReturn:
-    print(f"authyouragent vault: {msg}", file=sys.stderr)
-    sys.exit(1)
+    raise VaultError(msg)
 
 
 def _docker(*args, check=True, capture=True):
@@ -118,37 +121,57 @@ def _wait_ready(token, seconds=60):
     return False
 
 
-def up(a):
-    agent_id = a.agent_id or os.environ.get("AYA_AGENT_ID")
-    key = a.key or os.environ.get("AYA_KEY_FILE")
+def start(agent_id, key, cloud="https://authyouragent.com", image=IMAGE, gvisor="auto",
+          size="412x860", scale="2", pull=True, log=None):
+    """Start the vault, or wait for it if its container is already running.
+    Returns "started" or "running". Raises VaultError. Used by `vault up` and
+    by the MCP server when the vault is needed and not running; `log` gets
+    progress lines (the MCP server sends them to stderr, never stdout)."""
+    log = log or (lambda *a: None)
     if not agent_id or not key:
         _die("need --agent-id and --key (or AYA_AGENT_ID / AYA_KEY_FILE)")
     if _running():
-        print(f"already running ({NAME}). `authyouragent vault down` first to restart.")
-        return
+        # e.g. Docker is restarting it after a reboot: give it time to come up
+        if not _wait_ready(_token()):
+            _die(f"the vault container is running but not answering; see `docker logs {NAME}`")
+        return "running"
     _docker("rm", "-f", NAME, check=False)
     token = _token()
-    gvisor = {"auto": _has_gvisor(), "on": True, "off": False}[a.gvisor]
-    if a.gvisor == "on" and not _has_gvisor():
+    use_gvisor = {"auto": _has_gvisor(), "on": True, "off": False}[gvisor]
+    if gvisor == "on" and not _has_gvisor():
         _die("--gvisor on, but Docker has no 'runsc' runtime. See https://gvisor.dev/docs/user_guide/install/")
-    if not a.no_pull:
-        print(f"pulling {a.image} ...")
-        _docker("pull", "-q", a.image)
+    if pull:
+        log(f"pulling {image} ...")
+        r = _docker("pull", "-q", image, check=False)
+        if r.returncode != 0:
+            if _docker("image", "inspect", image, check=False).returncode != 0:
+                _die(f"docker pull failed: {(r.stderr or r.stdout).strip()[:400]}")
+            log("pull failed; using the copy already on this machine")
     args = ["run", "-d", "--name", NAME, "--restart", "unless-stopped",
             "--shm-size=1g", "--stop-timeout", "120",
             "--security-opt", f"seccomp={_seccomp()}",
             "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
             "-e", f"VAULT_TOKEN={token}", "-e", f"AYA_AGENT_ID={agent_id}",
-            "-e", f"AYA_CLOUD={a.cloud}", "-e", f"VAULT_SIZE={a.size}", "-e", f"VAULT_SCALE={a.scale}",
+            "-e", f"AYA_CLOUD={cloud}", "-e", f"VAULT_SIZE={size}", "-e", f"VAULT_SCALE={scale}",
             "-v", f"{_key_copy(key)}:/run/secrets/agent.pem:ro",
             "-v", f"{_state_dir()}:/var/lib/vault",
             "-p", f"127.0.0.1:{PORT}:{PORT}"]
-    if gvisor:
+    if use_gvisor:
         args += ["--runtime", "runsc"]
-    _docker(*args, a.image)
+    _docker(*args, image)
     if not _wait_ready(token):
         _die(f"started but not answering; see `docker logs {NAME}`")
-    print(f"vault running on 127.0.0.1:{PORT}  (browser sandbox: on, gVisor: {'on' if gvisor else 'off'})")
+    log(f"vault running on 127.0.0.1:{PORT}  (browser sandbox: on, gVisor: {'on' if use_gvisor else 'off'})")
+    return "started"
+
+
+def up(a):
+    if _running():
+        print(f"already running ({NAME}). `authyouragent vault down` first to restart.")
+        return
+    start(a.agent_id or os.environ.get("AYA_AGENT_ID"), a.key or os.environ.get("AYA_KEY_FILE"),
+          cloud=a.cloud, image=a.image, gvisor=a.gvisor, size=a.size, scale=a.scale,
+          pull=not a.no_pull, log=print)
     print("MCP server env:")
     env(a, quiet=True)
 
@@ -210,5 +233,8 @@ def main(argv=None):
     a = ap.parse_args(argv)
     try:
         a.fn(a)
+    except VaultError as e:
+        print(f"authyouragent vault: {e}", file=sys.stderr)
+        sys.exit(1)
     except BrokenPipeError:        # output piped into e.g. `head`
         pass

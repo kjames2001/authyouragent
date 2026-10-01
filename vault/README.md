@@ -17,7 +17,13 @@ authyouragent vault up --agent-id ag_... --key ./agent.pem
 
 `vault up` pulls the image, creates a token, and starts the vault on
 `127.0.0.1:7801` with every setting below. It prints the `env` block for your
-MCP client:
+MCP client.
+
+You can also skip `vault up`: if the vault is not running, the MCP server
+starts it the first time the agent needs the browser (the first start
+downloads about 500 MB, so that first call may ask the agent to try again in
+a minute). Set `AYA_VAULT_AUTOSTART=0` to turn this off. The server only
+starts the local vault at `127.0.0.1:7801`, never one you run elsewhere.
 
 ```json
 {"mcpServers": {"authyouragent": {
@@ -41,7 +47,7 @@ authyouragent vault env      # print the env block again
 |---|---|
 | Separate browser process, API only | The agent cannot read cookies or the browser's memory. The debug port exists only inside the container. |
 | Take over | Passwords, one-time codes and sign-in approvals are typed by you, on your phone. The agent's connection is closed while you are in control, and the phone viewer can only send taps and plain text (no keyboard shortcuts). |
-| Step-up approval | Before a click (or Enter) that submits a form, or on a button that says create, send, save, delete, pay, publish and similar, the vault asks you on your phone and waits. The request shows the button's words. The agent cannot skip it: every click goes through the vault. Search boxes and sign-in steps (password, code, "Verify") are not interrupted; "Authorize" and "Allow" on a sign-in page still ask. Add your own words with `VAULT_APPROVE_WORDS=transfer,wire`. |
+| Step-up approval | Before a click (or Enter) that submits a form, or on a button that says create, send, save, delete, pay, publish and similar, the vault asks you on your phone and waits. The request shows the button's words. The agent cannot skip it: every click goes through the vault. Any other click that makes the page send data to the site (a scripted POST, PUT, PATCH, DELETE or GraphQL mutation) is held until you approve. Search boxes and sign-in steps (password, code, "Verify") are not interrupted; "Authorize" and "Allow" on a sign-in page still ask. Add your own words with `VAULT_APPROVE_WORDS=transfer,wire`. |
 | Egress filter | The browser reaches only the public internet. Loopback, private networks, link-local (cloud metadata), CGNAT and the vault's own ports are refused. Checked on the resolved address, so DNS tricks do not help. |
 | Browser policy | No internal pages (`chrome://settings`, downloads...), no `file://`, no extensions, no downloads, no saved passwords or autofill. |
 | Chromium sandbox | Always on. Each page runs in its own restricted process. `vault up` supplies the seccomp profile this needs; no extra privileges are granted and all capabilities are dropped. |
@@ -67,10 +73,13 @@ authyouragent vault env      # print the env block again
   site's published OpenID Connect sign-out endpoint, then a "Sign out" link or
   button on its pages, and confirms by the session cookie being cleared. When
   none works it reports "wiped locally, not signed out".
-- **Step-up approval reads the page.** Every form submit asks, but a button
-  outside a form that sends its request from a script, with a label that does
-  not say what it does (an icon, "OK"), can pass without approval. Add words
-  with `VAULT_APPROVE_WORDS`, and keep the agent's grants narrow.
+- **Step-up approval reads the page and watches the click.** Every form
+  submit asks. A button whose words say nothing (an icon, "OK") is watched for
+  2 seconds after the click: a request that writes to the site (POST, PUT,
+  PATCH, DELETE, a GraphQL mutation) is held until you approve. Not caught: a
+  write the page sends later than that, or one sent to a different domain
+  (most such requests are analytics, so they are let through). Add words with
+  `VAULT_APPROVE_WORDS`, and keep the agent's grants narrow.
 - **One session per vault.** Run one vault per owner session.
 - **Cookie binding.** Chrome's Device Bound Session Credentials (DBSC) will make
   stolen cookies useless on other machines, but it needs a TPM and is Windows-only

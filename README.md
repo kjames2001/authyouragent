@@ -52,7 +52,7 @@ docker build -f vault/Dockerfile -t authyouragent/vault:local .
 authyouragent vault up --agent-id ag_... --key /path/to/agent-key.pem --image authyouragent/vault:local --no-pull
 ```
 
-The vault needs Docker. `vault up` prints the MCP settings to add to your client:
+The vault needs Docker. `vault up` prints the MCP settings to add to your client. (If you skip `vault up`, the MCP server starts the vault itself the first time the agent needs the browser; `AYA_VAULT_AUTOSTART=0` turns that off.)
 
 ```json
 {
