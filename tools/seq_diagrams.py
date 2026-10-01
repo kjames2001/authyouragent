@@ -43,7 +43,9 @@ def build(sid, title, rows):
         mk = f"{sid}k" if kind == "key" else f"{sid}a"
         tx = _text_x((x1 + x2) / 2, label)
         lcls = "lbl key" if kind == "key" else "lbl"
+        bw = len(label) * CH + 12
         out.append(f'<line class="{cls}" x1="{x1}" y1="{y}" x2="{x2}" y2="{y}" marker-end="url(#{mk})"/>'
+                   f'<rect class="mask" x="{tx - bw / 2:.1f}" y="{y - 27}" width="{bw:.1f}" height="20"/>'
                    f'<text class="{lcls}" x="{tx}" y="{y - 11}" text-anchor="middle">{escape(label)}</text>')
     out.append("</svg>")
     return "".join(out)

@@ -155,7 +155,7 @@ footer.site .sp{margin-left:auto}
 footer.site .name{color:var(--ink);font-weight:600}
 
 /* sequence diagram (how an approval works) */
-.seq{margin:26px 0 4px;overflow-x:auto}
+.seq{margin:26px 0 4px;overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:8px}
 .seq svg{display:block;min-width:760px;width:100%;height:auto}
 .seq text{font:14px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;fill:var(--ink)}
 .seq .lane{stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 4}
@@ -164,8 +164,10 @@ footer.site .name{color:var(--ink);font-weight:600}
 .seq .msg{stroke:var(--dim);stroke-width:1.5;fill:none}
 .seq .msg.key{stroke:var(--acc);stroke-width:2}
 .seq .note{fill:var(--code);stroke:var(--line)}
-.seq .lbl{fill:var(--ink);paint-order:stroke;stroke:var(--bg);stroke-width:7px;stroke-linejoin:round}
-.seq .note + .lbl{stroke:var(--code)}
+/* labels: plain fill, no stroke halo (blurs text on WebViews without paint-order);
+   a panel-coloured box behind each label hides the dashed lanes instead */
+.seq .lbl{fill:var(--ink)}
+.seq .mask{fill:var(--panel)}
 .seq .lbl.key{fill:var(--acc);font-weight:600}
 @media (prefers-color-scheme: light){ .seq .lbl.key{fill:#0f766e} }
 .seq marker path{fill:var(--dim)}
