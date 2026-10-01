@@ -32,13 +32,17 @@ For just the SDK (no browser, no MCP): `pip install authyouragent`.
 
 ## MCP server
 
-The `authyouragent-mcp` command starts an MCP server with eleven tools:
+The `authyouragent-mcp` command starts an MCP server with thirteen tools:
 
 - **Browser:** `navigate`, `click`, `type_text`, `read_page`. Only public
   websites open. Clicks that submit a form, or whose button says create, send,
   save, delete, pay and the like, wait for your approval on your phone.
 - **`check_login_wall`**: is the page asking for a password, a code or a
   sign-in approval?
+- **`list_secrets`** / **`fill_secret`**: fill a username, password or
+  authenticator code from your own Bitwarden or Vaultwarden (only the items in
+  its "Auth Your Agent" folder). The agent never sees the value; it fills only
+  on the item's own site and only the right kind of field.
 - **`request_takeover`** / **`wait_for_takeover`**: you take over the browser
   from your phone. The agent is disconnected until you finish, and the vault
   hands back by itself once you have signed in.

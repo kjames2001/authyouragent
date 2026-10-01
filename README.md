@@ -12,7 +12,7 @@ The MCP server, the browser vault and the SDKs:
 
 | Path | What it is |
 |---|---|
-| [`sdk/authyouragent/mcp_server.py`](sdk/authyouragent/mcp_server.py) | **The MCP server** (stdio, 11 tools). Entry point `authyouragent-mcp`. |
+| [`sdk/authyouragent/mcp_server.py`](sdk/authyouragent/mcp_server.py) | **The MCP server** (stdio, 13 tools). Entry point `authyouragent-mcp`. |
 | [`vault/`](vault/) | **The browser vault**: [`broker.py`](vault/broker.py) (HTTP API the MCP server calls; drives Chromium, detects sign-in, signs out), [`egress.py`](vault/egress.py) (public-internet-only proxy), [`screen.py`](vault/screen.py) (phone screen stream), [`seccomp.json`](vault/seccomp.json), [`chromium-policy.json`](vault/chromium-policy.json), [`Dockerfile`](vault/Dockerfile). Details: [vault/README.md](vault/README.md). |
 | [`sdk/authyouragent/vault_cli.py`](sdk/authyouragent/vault_cli.py) | `authyouragent vault up/down/status/env`: runs the vault with every protection on. |
 | [`sdk/authyouragent/`](sdk/authyouragent/) | Python SDK: agent side ([`agent.py`](sdk/authyouragent/agent.py)), website side ([`site.py`](sdk/authyouragent/site.py)), take-over helper for your own Playwright browser ([`takeover.py`](sdk/authyouragent/takeover.py)). |
@@ -26,6 +26,7 @@ The phone app and the approval service run at authyouragent.com. The agent signs
 | Tool | What it does |
 |---|---|
 | `navigate`, `click`, `type_text`, `read_page` | Drive the vault's browser. Only public websites open. Clicks that submit a form, or whose button says create, send, save, delete, pay and the like, ask the owner's phone first. |
+| `list_secrets`, `fill_secret` | Fill a username, password or authenticator code from the owner's Bitwarden or Vaultwarden into the page. The agent never sees the value; it fills only on the item's own site and only the right kind of field. |
 | `check_login_wall` | Is the page blocked by a password, CAPTCHA, one-time code or sign-in approval? Reads the page's fields and text, so the model needs no vision. |
 | `request_takeover` | Ask the owner to take over the browser from their phone. Returns `done`, `cancelled`, `expired`, `incomplete`, or `waiting`. |
 | `wait_for_takeover` | Keep waiting after `waiting`. |

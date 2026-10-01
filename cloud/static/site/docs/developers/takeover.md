@@ -35,12 +35,14 @@ The vault needs Docker. `vault up` starts it on `127.0.0.1:7801` with every prot
 
 `AYA_AGENT_ID` and the key come from adding the agent in the app (**Agents → Add an agent**). Node-based clients can use `npx authyouragent-mcp` instead of `authyouragent-mcp`.
 
-The agent gets eleven tools:
+The agent gets thirteen tools:
 
 | Tool | Purpose |
 |---|---|
 | `navigate`, `click`, `type_text`, `read_page` | Drive the vault's browser. Only public websites open. Clicks that commit something wait for the owner's approval. |
 | `check_login_wall` | Is the page asking for a password, a CAPTCHA, a code or a sign-in approval? |
+| `list_secrets` | The sign-ins the owner has shared from their password manager: names, sites and fields, never values. |
+| `fill_secret(selector, name, field)` | Type a username, password or authenticator code from the owner's password manager into a field. The agent never sees the value. See [Saved sign-ins](#saved-sign-ins). |
 | `request_takeover(reason)` | Ask the owner to take over. Returns `done`, `cancelled`, `expired` or `incomplete` with a line saying what to do next, or `waiting` with a `takeover_id` after `wait_seconds` (default 240). |
 | `wait_for_takeover(takeover_id)` | Keep waiting after `waiting`. |
 | `request_approval(site, action)` | Ask the owner to approve an action. `approved`, `denied` or `expired`. |
@@ -57,6 +59,32 @@ What the vault enforces, whatever the agent does:
 - **No internal browser pages**, `file://`, extensions, downloads or saved passwords.
 - **Chromium's sandbox on**, all container capabilities dropped; under gVisor automatically when Docker has the `runsc` runtime.
 - **Sign out first, wipe second.** At the end of a session, and when the agent stops sending heartbeats or is revoked, the vault signs out of each site, confirms it where it can, then destroys the in-memory profile. Sites it could not sign out of are reported to the owner, also after a crash.
+
+## Saved sign-ins
+
+For sites the agent signs in to often, a take over each time is too slow. The owner can instead share chosen sign-ins from their own **Bitwarden** or **Vaultwarden** with the vault. The agent asks the vault to fill a field; the vault types the value itself, and the agent never sees it. Authenticator codes work the same way: the vault computes the current code, and the key stays in the password manager.
+
+1. In the password manager, make a folder named **Auth Your Agent** and move into it only the sign-ins the agent may use. Each item needs the site's address. Items outside the folder, and items owned by an organization, are never read.
+2. Write a config file, readable only by you:
+
+```json
+{"url": "https://vault.bitwarden.com",
+ "email": "you@example.com",
+ "master_password": "...",
+ "client_id": "user.xxxxxxxx", "client_secret": "..."}
+```
+
+`url` is your Vaultwarden address, or `https://vault.bitwarden.com` / `https://vault.bitwarden.eu`. The API key (**Account settings → Security → Keys → View API key**) is recommended, and needed if two-step login is on. The master password decrypts the items inside the vault and is never sent to the server.
+
+3. `authyouragent vault up --agent-id ag_... --key agent.pem --bitwarden bitwarden.json`. Later starts reuse it.
+
+The vault fills a value only when all of these hold:
+
+- the page's address has the same scheme, host and port as an address saved with the item (stricter than Bitwarden's default, so a sister subdomain or plain http does not qualify; "regular expression" and "never" match rules are not used);
+- the field is in the page itself, not in a frame;
+- the field is the right kind: a password only into a password field, a code only into a one-time-code field, a username only into a text or email field. So a password cannot be typed into a comment box and posted.
+
+Every fill appears in the owner's activity as `secret_filled`, with the item name and field, never the value. `read_page` never returns field values. Submitting the form still follows the approval rules above.
 
 Details and known limits: [vault guide](https://github.com/kjames2001/authyouragent/blob/main/vault/README.md).
 

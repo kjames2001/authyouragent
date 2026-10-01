@@ -12,9 +12,9 @@ ENV PATH=/opt/venv/bin:$PATH PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 COPY sdk /src/sdk
 RUN pip install --no-cache-dir --retries 10 --timeout 60 "/src/sdk[takeover]" "playwright>=1.40" "aiohttp>=3.9" \
-        "python-xlib>=0.33" "pillow>=10"
+        "python-xlib>=0.33" "pillow>=10" "argon2-cffi>=23"
 
-COPY vault/broker.py vault/screen.py vault/egress.py vault/entrypoint.sh /app/
+COPY vault/broker.py vault/screen.py vault/egress.py vault/bitwarden.py vault/entrypoint.sh /app/
 # Browser policy: no internal pages, dev tools, downloads, extensions or saved passwords.
 COPY vault/chromium-policy.json /etc/chromium/policies/managed/vault.json
 RUN chmod +x /app/entrypoint.sh && useradd -m -u 10001 vault

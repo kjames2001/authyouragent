@@ -20,9 +20,9 @@ Environment:
   AYA_VAULT_AUTOSTART   default 1: start the local vault (Docker) on first use if
                         it is not running. Set 0 to manage it with `authyouragent vault`.
 
-Tools: navigate, click, type_text, read_page, check_login_wall, request_takeover,
-       wait_for_takeover, request_approval, end_session, check_agent_status,
-       report_site.
+Tools: navigate, click, type_text, read_page, check_login_wall, list_secrets,
+       fill_secret, request_takeover, wait_for_takeover, request_approval,
+       end_session, check_agent_status, report_site.
 
 The vault ends the session by itself (real sign-out, then the browser profile is
 destroyed) if this server stops sending heartbeats or the owner revokes the agent.
@@ -212,13 +212,46 @@ async def click(selector: str) -> str:
 @mcp.tool()
 async def type_text(selector: str, text: str, submit: bool = False) -> str:
     """Type into a form field (replaces its value). Never use this for the owner's
-    passwords or codes: ask for a take over instead.
+    passwords or codes: use fill_secret if the owner saved the sign-in, otherwise
+    ask for a take over.
     selector: the field, e.g. "input[name=url]".
     text: what to type.
     submit: press Enter afterwards."""
     try:
         d = await _call('POST', '/type', json={'selector': selector, 'text': text, 'submit': submit})
         return f"typed into: {selector}\npage: {_where(d)}"
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool()
+async def list_secrets() -> str:
+    """List the sign-ins the owner has made available to you from their password
+    manager: each item's name, the sites it may be used on, and which fields it
+    has (username, password, totp). Values are never shown to you."""
+    try:
+        items = (await _call('GET', '/secrets'))["items"]
+    except Exception as e:
+        return _err(e)
+    if not items:
+        return "no sign-ins are available (the owner has none in the shared folder)"
+    return "\n".join(f"- {i['name']}: {', '.join(i['fields']) or 'no fields'}  "
+                     f"(sites: {', '.join(i['sites']) or 'none'})" for i in items)
+
+
+@mcp.tool()
+async def fill_secret(selector: str, name: str, field: str = "password") -> str:
+    """Fill a field from the owner's password manager. The vault types the value
+    itself; you never see it. It only fills on a site saved with the item, and
+    only the right kind of field: a password into a password field, a totp code
+    into a one-time code field, a username into a text or email field. Then
+    click the sign-in button as usual.
+    selector: the field, e.g. "input[type=password]".
+    name: the item name from list_secrets.
+    field: username, password or totp."""
+    try:
+        d = await _call('POST', '/fill_secret', json={'selector': selector, 'name': name, 'field': field})
+        return f"filled {field} of '{name}' into: {selector}\npage: {_where(d)}"
     except Exception as e:
         return _err(e)
 

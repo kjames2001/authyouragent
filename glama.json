@@ -46,6 +46,14 @@
       "description": "Report whether the page is blocked by a sign-in, CAPTCHA, one-time code or sign-in approval."
     },
     {
+      "name": "list_secrets",
+      "description": "List the sign-ins the owner shared from their Bitwarden or Vaultwarden: names, sites and fields, never values."
+    },
+    {
+      "name": "fill_secret",
+      "description": "Fill a username, password or authenticator code from the owner's password manager. The agent never sees the value."
+    },
+    {
       "name": "request_takeover",
       "description": "Ask the owner to take over the browser from their phone. Returns done, cancelled, expired, incomplete, or waiting."
     },

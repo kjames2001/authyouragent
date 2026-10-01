@@ -37,6 +37,7 @@ from urllib.parse import parse_qsl, urlparse
 from aiohttp import ClientSession, ClientTimeout, web
 from playwright.async_api import async_playwright
 
+import bitwarden
 import egress
 from authyouragent.agent import AgentClient
 from authyouragent.takeover import BLOCKING_JS, login_finished
@@ -885,6 +886,84 @@ async def read(request):
     return web.json_response({**await _where(page), "text": text[:n]})
 
 
+# ── Stored secrets (the owner's Bitwarden / Vaultwarden) ──
+# The agent names an item; the vault types its value into one field and never
+# returns it. A value is filled only on an address saved with the item (same
+# scheme, host and port), only into the page's own top frame, and only into a
+# field of the right kind: a password into a password field, a code into a
+# short one-time-code field, a username into a single-line input. So it cannot
+# be typed into a comment box or a look-alike site.
+FIELD_JS = r"""(el) => {
+  const top = window === window.top;
+  const tag = el.tagName, type = (el.getAttribute('type') || 'text').toLowerCase();
+  const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+  const hint = [el.name, el.id, el.getAttribute('placeholder'), el.getAttribute('aria-label'), ac]
+    .join(' ').toLowerCase();
+  const max = el.maxLength > 0 ? el.maxLength : 0;
+  return {top, origin: location.origin, tag, type, ac, hint, max,
+          inputmode: (el.getAttribute('inputmode') || '').toLowerCase(),
+          editable: !el.disabled && !el.readOnly};
+}"""
+CODE_HINT = re.compile(r"one-time-code|otp|totp|2fa|mfa|two.?factor|verif|auth.?code|security.?code|\bcode\b|token|pin", re.I)
+
+
+def _field_ok(f, field):
+    if not f["top"]:
+        return "the field is inside a frame; secrets are filled only in the page itself"
+    if f["tag"] != "INPUT" or not f["editable"]:
+        return "not an editable input field"
+    if field == "password":
+        return None if f["type"] == "password" else "a password goes only into a password field"
+    if field == "totp":
+        if f["type"] not in ("text", "tel", "number", "password"):
+            return "not a code field"
+        if f["ac"] == "one-time-code" or (CODE_HINT.search(f["hint"]) and (f["max"] == 0 or f["max"] <= 10)):
+            return None
+        return "this does not look like a one-time code field"
+    if field == "username":
+        return None if f["type"] in ("text", "email", "tel") else "a username goes only into a text or email field"
+    return "unknown field"
+
+
+async def list_secrets(request):
+    try:
+        return web.json_response({"items": await bitwarden.STORE.list()})
+    except bitwarden.SecretsError as e:
+        return web.json_response({"error": "secrets", "detail": str(e)}, status=400)
+
+
+async def fill_secret(request):
+    body = await request.json()
+    name, field, sel = str(body.get("name", "")), str(body.get("field", "password")), str(body["selector"])
+    if field not in ("username", "password", "totp"):
+        return web.json_response({"error": "secrets", "detail": "field must be username, password or totp"}, status=400)
+    page = await V.attach()
+    V.used = True
+    el = await page.locator(sel).first.element_handle(timeout=10000)
+    f = await el.evaluate(FIELD_JS)
+    if f["origin"] != f"{urlparse(page.url).scheme}://{urlparse(page.url).netloc}":
+        return web.json_response({"error": "secrets", "detail": "the field is not on this page"}, status=400)
+    why = _field_ok(f, field)
+    if why:
+        return web.json_response({"error": "secrets", "detail": why}, status=400)
+    try:
+        value = await bitwarden.STORE.value(name, field, page.url)
+    except bitwarden.SecretsError as e:
+        return web.json_response({"error": "secrets", "detail": str(e)}, status=400)
+    try:
+        await el.fill(value, timeout=10000)
+    finally:
+        value = None
+    # The page could change the field while it was filled: check it again,
+    # and clear it if it is no longer the kind of field the secret may go in.
+    if _field_ok(await el.evaluate(FIELD_JS), field):
+        await el.fill("")
+        return web.json_response({"error": "secrets", "detail": "the field changed while it was filled; cleared"}, status=400)
+    site = urlparse(page.url).hostname or ""
+    await asyncio.to_thread(V.agent().report_status, "secret_filled", site, f"{name} ({field})")
+    return web.json_response({**await _where(page), "filled": field})
+
+
 async def login_wall(request):
     page = await V.attach()
     try:
@@ -1011,6 +1090,7 @@ def main():
         web.post("/navigate", navigate), web.post("/click", click),
         web.post("/type", type_text), web.get("/read", read),
         web.get("/login_wall", login_wall),
+        web.get("/secrets", list_secrets), web.post("/fill_secret", fill_secret),
         web.post("/takeover", start_takeover), web.get("/takeover/{jid}", wait_takeover),
         web.post("/end_session", end_session),
     ])

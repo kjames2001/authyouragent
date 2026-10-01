@@ -96,6 +96,28 @@ def _key_copy(key):
     return dst
 
 
+def _bitwarden_copy(path):
+    """The password manager config, readable only by the vault user."""
+    src = Path(path).expanduser()
+    if not src.is_file():
+        _die(f"bitwarden config not found: {src}")
+    try:
+        cfg = json.loads(src.read_text())
+    except ValueError as e:
+        _die(f"bitwarden config is not valid JSON: {e}")
+    missing = [k for k in ("url", "email", "master_password") if not cfg.get(k)]
+    if missing:
+        _die(f"bitwarden config is missing: {', '.join(missing)}")
+    dst = HOME / "bitwarden.json"
+    shutil.copyfile(src, dst)
+    try:
+        os.chown(dst, VAULT_UID, VAULT_UID)
+        dst.chmod(0o400)
+    except PermissionError:
+        dst.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+    return dst
+
+
 def _state_dir():
     d = HOME / "state"
     d.mkdir(parents=True, exist_ok=True)
@@ -122,11 +144,13 @@ def _wait_ready(token, seconds=60):
 
 
 def start(agent_id, key, cloud="https://authyouragent.com", image=IMAGE, gvisor="auto",
-          size="412x860", scale="2", pull=True, log=None):
+          size="412x860", scale="2", pull=True, log=None, bitwarden=None):
     """Start the vault, or wait for it if its container is already running.
     Returns "started" or "running". Raises VaultError. Used by `vault up` and
     by the MCP server when the vault is needed and not running; `log` gets
-    progress lines (the MCP server sends them to stderr, never stdout)."""
+    progress lines (the MCP server sends them to stderr, never stdout).
+    `bitwarden`: path of a password manager config (see vault/bitwarden.py);
+    default AYA_BITWARDEN_FILE, or the copy kept from the last `vault up`."""
     log = log or (lambda *a: None)
     if not agent_id or not key:
         _die("need --agent-id and --key (or AYA_AGENT_ID / AYA_KEY_FILE)")
@@ -156,6 +180,11 @@ def start(agent_id, key, cloud="https://authyouragent.com", image=IMAGE, gvisor=
             "-v", f"{_key_copy(key)}:/run/secrets/agent.pem:ro",
             "-v", f"{_state_dir()}:/var/lib/vault",
             "-p", f"127.0.0.1:{PORT}:{PORT}"]
+    bw = bitwarden or os.environ.get("AYA_BITWARDEN_FILE")
+    if bw:
+        args += ["-v", f"{_bitwarden_copy(bw)}:/run/secrets/bitwarden.json:ro"]
+    elif (HOME / "bitwarden.json").is_file():
+        args += ["-v", f"{HOME / 'bitwarden.json'}:/run/secrets/bitwarden.json:ro"]
     if use_gvisor:
         args += ["--runtime", "runsc"]
     _docker(*args, image)
@@ -171,7 +200,7 @@ def up(a):
         return
     start(a.agent_id or os.environ.get("AYA_AGENT_ID"), a.key or os.environ.get("AYA_KEY_FILE"),
           cloud=a.cloud, image=a.image, gvisor=a.gvisor, size=a.size, scale=a.scale,
-          pull=not a.no_pull, log=print)
+          pull=not a.no_pull, log=print, bitwarden=a.bitwarden)
     print("MCP server env:")
     env(a, quiet=True)
 
@@ -223,6 +252,7 @@ def main(argv=None):
     u.add_argument("--size", default="412x860", help="page size in CSS px (phone-shaped by default)")
     u.add_argument("--scale", default="2")
     u.add_argument("--no-pull", action="store_true")
+    u.add_argument("--bitwarden", help="password manager config (JSON) for fill_secret; kept for later starts")
     u.set_defaults(fn=up)
     sub.add_parser("down", help="sign out of every site, then stop").set_defaults(fn=down)
     sub.add_parser("status").set_defaults(fn=status)
