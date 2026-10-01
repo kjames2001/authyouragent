@@ -66,7 +66,9 @@ def _split_hostport(s, default):
 
 
 async def _refuse(w, why):
-    w.write(b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
+    # X-Vault-Blocked lets the broker tell this refusal from a site's own 403.
+    w.write(b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nX-Vault-Blocked: 1\r\n"
+            b"Connection: close\r\n\r\n"
             + f"Blocked by the Auth Your Agent vault: {why}\n".encode())
     try:
         await w.drain()

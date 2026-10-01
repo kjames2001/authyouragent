@@ -125,8 +125,12 @@ def _err(e):
 
 @mcp.tool()
 async def navigate(url: str) -> str:
-    """Open a URL in the browser.
-    url: the full URL, e.g. "https://example.com"."""
+    """Open a URL in the vault's browser and wait for the page to load. Returns the
+    final URL and title, after any redirects (a redirect to a sign-in page means
+    you need check_login_wall, then request_takeover). Only public websites open:
+    local, private-network and internal addresses are refused with an error.
+    The page keeps any session the owner signed in to during a take over.
+    url: the full URL, e.g. "https://example.com/account"."""
     try:
         return f"page: {_where(await _call('POST', '/navigate', json={'url': url}))}"
     except Exception as e:
@@ -135,7 +139,12 @@ async def navigate(url: str) -> str:
 
 @mcp.tool()
 async def click(selector: str) -> str:
-    """Click an element on the page.
+    """Click an element on the current page and return the page's URL and title
+    afterwards. If the click would commit something (it submits a form, or the
+    button says create, send, save, delete, pay and the like), the vault first asks
+    the owner to approve it on their phone and waits up to about five minutes; a
+    denial returns an error and nothing is clicked. Sign-in and search forms are
+    not interrupted.
     selector: a CSS or Playwright selector, e.g. "button[type=submit]" or "text=Add Server"."""
     try:
         return f"clicked: {selector}\npage: {_where(await _call('POST', '/click', json={'selector': selector}))}"
@@ -159,7 +168,10 @@ async def type_text(selector: str, text: str, submit: bool = False) -> str:
 
 @mcp.tool()
 async def read_page(max_chars: int = 5000) -> str:
-    """Read the page's URL, title and visible text (no screenshot needed)."""
+    """Read the current page: its URL, title and visible text, in reading order.
+    Use it after navigate or click to see what is on screen (no screenshot needed).
+    Text in form fields and hidden elements is not included.
+    max_chars: how much text to return, 200 to 20000 (default 5000)."""
     try:
         d = await _call('GET', '/read', params={'max_chars': max_chars})
         return f"url: {d['url']}\ntitle: {d['title']}\n\n{d['text']}"
@@ -232,7 +244,12 @@ async def request_takeover(reason: str, wait_seconds: int = WAIT_DEFAULT, ctx: C
 @mcp.tool()
 async def wait_for_takeover(takeover_id: str, wait_seconds: int = WAIT_DEFAULT,
                             ctx: Context = None) -> str:
-    """Keep waiting for a take over that request_takeover reported as still waiting."""
+    """Keep waiting for a take over that request_takeover returned as "waiting".
+    Returns the same results as request_takeover: done (continue on the signed-in
+    page), cancelled or expired (stop and tell your user), incomplete (the page
+    still asks for sign-in), or waiting again with the same takeover_id.
+    takeover_id: the id request_takeover returned, e.g. "tk_...".
+    wait_seconds: how long to wait this time (default as request_takeover)."""
     try:
         return await _wait(takeover_id, wait_seconds, ctx)
     except Exception as e:

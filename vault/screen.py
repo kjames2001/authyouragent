@@ -85,10 +85,8 @@ async def run(ws, restart_url, log, watcher=None):
         return (str(max(0, min(scr.w - 1, round(float(x) * k)))),
                 str(max(0, min(scr.h - 1, round(float(y) * k)))))
 
-    task = asyncio.create_task(frames())
-    watch = asyncio.create_task(watcher(ws)) if watcher else None
-    result = "agent_left"
-    try:
+    async def serve():
+        """Apply the owner's input until the relay says how the take over ended."""
         async for raw in ws:
             m = json.loads(raw)
             k = m.get("t")
@@ -114,15 +112,33 @@ async def run(ws, restart_url, log, watcher=None):
             elif k == "nav" and m.get("to") == "restart":
                 await restart_url()
             elif k in ("done", "cancelled", "expired", "agent_left"):
-                result = k
-                break
+                return k
+        return "agent_left"
+
+    task = asyncio.create_task(frames())
+    watch = asyncio.create_task(watcher(ws)) if watcher else None
+
+    def signed_in():
+        # The watcher returns True once it has seen the sign-in finish.
+        return bool(watch and watch.done() and not watch.cancelled()
+                    and watch.exception() is None and watch.result())
+    try:
+        result = await serve()
+    except Exception as e:
+        # The relay dropped without a close frame; decided below.
+        log("relay closed:", type(e).__name__, e)
+        result = "agent_left"
     finally:
         stop.set()
         task.cancel()
-        if watch:
+        if watch and not watch.done():
             watch.cancel()
         try:
             scr.d.close()
         except Exception:
             pass
+    # If the vault saw the sign-in finish, the take over succeeded even when the
+    # relay closed before (or instead of) confirming it.
+    if result == "agent_left" and signed_in():
+        result = "done"
     return result

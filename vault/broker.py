@@ -247,8 +247,11 @@ async def _watch_signin(ws, site, blocked_at_start, cookies_at_start):
             finished = False
         if finished:
             _log("sign-in finished, handing back automatically")
-            await ws.send(json.dumps({"t": "done"}))
-            return
+            try:
+                await ws.send(json.dumps({"t": "done"}))
+            except Exception:
+                pass                    # the relay may already be closing; the sign-in still finished
+            return True
         ok_since = None                 # still a prompt on the page: keep watching
 
 
@@ -614,14 +617,20 @@ async def navigate(request):
     page = await V.attach()
     V.used = True
     try:
-        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        resp = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
     except Exception as e:
         # After a blocked page the tab can still be settling on Chromium's error
         # page, which interrupts the next navigation. Try once more.
         if "interrupted by another navigation" not in str(e):
             raise
         await asyncio.sleep(0.5)
-        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        resp = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    # Plain http:// goes through the egress filter as a normal request, so a
+    # refusal arrives as a page, not a network error. Report it as one.
+    if resp is not None and resp.headers.get("x-vault-blocked"):
+        await page.goto("about:blank")
+        return web.json_response({"error": "blocked", "detail":
+            "blocked by the vault: only public websites can be opened"}, status=403)
     return web.json_response(await _where(page))
 
 
@@ -633,8 +642,13 @@ SENSITIVE = re.compile(
     r"\b(submit|send|post|publish|share|delete|remove|erase|destroy|cancel (my )?(account|subscription|order)|"
     r"close account|deactivate|pay|purchase|buy|order|checkout|check out|place order|subscribe|upgrade|donate|"
     r"transfer|withdraw|confirm|approve|accept|authori[sz]e|grant|allow|invite|add (member|user|collaborator)|"
-    r"make public|change (password|email)|reset|merge|deploy|release|save changes?|update (password|email|payment))\b",
+    r"make public|change (password|email)|reset|merge|deploy|release|save changes?|update (password|email|payment)|"
+    r"create|comment|reply|save|update|rename|archive|reopen|block|report|book|reserve|"
+    r"close (issue|pull request|account)|apply (now|for)|leave (group|team|organi[sz]ation)|"
+    r"add (comment|reply|review|key|email|account|payment|card|address))\b",
     re.I)
+# Labels that never need approval: steps of signing in, searching, cookie banners.
+HARMLESS = re.compile(r"^(sign|log) ?(in|up)$|^continue$|^next$|^search|cookie", re.I)
 EXTRA = [w.strip() for w in os.environ.get("VAULT_APPROVE_WORDS", "").split(",") if w.strip()]
 APPROVAL_WAIT = 290
 
@@ -652,16 +666,29 @@ TARGET_JS = r"""(el) => {
   // A form with exactly one password field is a sign-in form (a password
   // change has two or more).
   const secrets = form ? form.querySelectorAll('input[type=password]').length : 0;
-  return {label: label.slice(0, 80), isSubmit, formSubmit: formSubmit.slice(0, 80), signIn: secrets === 1};
+  // Search and filter forms change nothing. Only an explicit method="get" counts:
+  // script-driven forms often leave method out and post with fetch.
+  // A form whose only text field is named q / query / search is a search box
+  // even when it posts (DuckDuckGo's HTML search does).
+  const fields = form ? [...form.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select')] : [];
+  const searchField = fields.length === 1 && /^(q|query|search|search_query|keywords?|s)$/i.test(fields[0].name || '');
+  const searchForm = !!form && ((form.getAttribute('method') || '').toLowerCase() === 'get'
+    || form.getAttribute('role') === 'search' || !!form.closest('[role=search]')
+    || !!form.querySelector('input[type=search]') || /search/i.test(form.getAttribute('action') || '')
+    || /(^|[\s_-])search([\s_-]|$)/i.test(form.id + ' ' + form.className) || searchField);
+  return {label: label.slice(0, 80), isSubmit, inForm: !!form, formSubmit: formSubmit.slice(0, 80),
+          signIn: secrets === 1, searchForm};
 }"""
 
 
-def _needs_approval(label):
-    if not label:
+def _needs_approval(label, submits_form=False):
+    """True when the action commits something: its wording says so, or it
+    submits a form (whatever the wording). Callers exempt sign-in and search."""
+    if label and HARMLESS.search(label):
         return False
-    if re.search(r"^(sign|log) ?(in|up)$|^continue$|^next$|^search|cookie", label, re.I):
-        return False
-    return bool(SENSITIVE.search(label) or any(w.lower() in label.lower() for w in EXTRA))
+    if submits_form:
+        return True
+    return bool(label) and bool(SENSITIVE.search(label) or any(w.lower() in label.lower() for w in EXTRA))
 
 
 async def _approve(page, label):
@@ -695,12 +722,17 @@ class NotApproved(Exception):
     pass
 
 
-async def _guarded(page, selector, label_of, act):
+async def _guarded(page, selector, label_of, act, submits_form):
     """Run `act()` only after the owner approves, if the target commits something."""
     info = await page.locator(selector).first.evaluate(TARGET_JS)
     label = label_of(info)
     sign_in = info["signIn"] and not re.search(r"change|update|reset|new password", label, re.I)
-    if not sign_in and _needs_approval(label):
+    # Any form submit asks, except search forms and the steps of signing in
+    # (codes, "Verify"). On sign-in pages the wording rule still applies, so an
+    # OAuth "Authorize" or "Allow" button still asks the owner.
+    form_rule = submits_form(info) and not info["searchForm"] and not _is_auth_step(page.url)
+    if not sign_in and _needs_approval(label, form_rule):
+        label = label or "submit form"
         result = await _approve(page, label)
         if result != "approved":
             raise NotApproved(f"the owner did not approve '{label}' ({result})")
@@ -713,7 +745,8 @@ async def click(request):
     sel = str(body["selector"])
     await page.locator(sel).first.wait_for(timeout=10000)
     await _guarded(page, sel, lambda i: i["label"],
-                   lambda: page.click(sel, timeout=10000))
+                   lambda: page.click(sel, timeout=10000),
+                   lambda i: i["isSubmit"])
     await asyncio.sleep(0.5)
     return web.json_response(await _where(page))
 
@@ -726,7 +759,8 @@ async def type_text(request):
     if body.get("submit"):
         # Enter submits the field's form: same rule as clicking its submit button
         await _guarded(page, sel, lambda i: i["formSubmit"],
-                       lambda: page.press(sel, "Enter"))
+                       lambda: page.press(sel, "Enter"),
+                       lambda i: i["inForm"])
         await asyncio.sleep(0.5)
     return web.json_response(await _where(page))
 

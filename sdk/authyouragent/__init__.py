@@ -30,5 +30,5 @@ from .site import SiteVerifier, AuthError, Auth
 
 __all__ = ["AgentClient", "AgentError", "keygen", "agent_jwk",
            "SiteVerifier", "AuthError", "Auth"]
-__version__ = "0.3.0"
+__version__ = "0.3.2"
 DEFAULT_CLOUD = "https://authyouragent.com"
