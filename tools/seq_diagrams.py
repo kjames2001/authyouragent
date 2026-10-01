@@ -1,6 +1,6 @@
-"""Generate the two sequence diagrams on the home page (cloud/static/site/home.html).
+"""Generate the sequence diagrams on the home page (cloud/static/site/home.html).
 
-Run: python tools/seq_diagrams.py  -> rewrites the two <svg> blocks in place.
+Run: python tools/seq_diagrams.py  -> rewrites the <svg> blocks in place.
 Colours come from site.css (.seq rules), so the diagrams follow light/dark mode.
 """
 import re
@@ -11,7 +11,6 @@ from xml.sax.saxutils import escape
 HOME = Path(__file__).resolve().parent.parent / "cloud/static/site/home.html"
 W = 860
 LANES = [("Agent", 90, 96), ("Auth Your Agent", 330, 150), ("Your phone", 560, 112), ("Website", 770, 96)]
-X = {n: x for n, x, _ in LANES}
 TOP, ROW, PAD = 92, 54, 6          # first message y, row height, arrow gap to lane
 CH = 7.6                           # rough width of one 14px character
 
@@ -21,18 +20,23 @@ def _text_x(cx, label):
     return max(half, min(W - half, cx))
 
 
-def build(sid, title, rows):
+def build(sid, title, rows, lanes=LANES):
+    X = {n: x for n, x, _ in lanes}
     h = TOP + ROW * (len(rows) - 1) + 40
     out = [f'<svg viewBox="0 0 {W} {h}" role="img" aria-labelledby="{sid}"><title id="{sid}">{escape(title)}</title>',
            f'<defs><marker id="{sid}a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z"/></marker>'
            f'<marker id="{sid}k" class="k" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z"/></marker></defs>']
-    for name, x, bw in LANES:
+    for name, x, bw in lanes:
         out.append(f'<g class="head"><rect x="{x - bw / 2}" y="10" width="{bw}" height="34" rx="8"/><text x="{x}" y="32">{escape(name)}</text></g>'
                    f'<line class="lane" x1="{x}" y1="44" x2="{x}" y2="{h - 6}"/>')
     for i, (a, b, label, kind) in enumerate(rows):
         y = TOP + ROW * i
         if kind == "note":
             x1, x2 = X[a] - 40, X[b] + 40
+            need = len(label) * CH + 28
+            if x2 - x1 < need:
+                c = (x1 + x2) / 2
+                x1, x2 = c - need / 2, c + need / 2
             out.append(f'<rect class="note" x="{x1}" y="{y - 22}" width="{x2 - x1}" height="34" rx="8"/>'
                        f'<text class="lbl" x="{(x1 + x2) / 2}" y="{y}" text-anchor="middle">{escape(label)}</text>')
             continue
@@ -83,11 +87,27 @@ TAKEOVER = build("seqt2",
     ("Agent", "Auth Your Agent", "7. done: vault signs you out", ""),
 ])
 
+SAVED = build("seqt3",
+    "Saved sign-in sequence: the agent asks the vault to fill a saved password or code by item name. The vault checks "
+    "the page, reads the item from your Bitwarden or Vaultwarden, types it into the field, and tells the agent only "
+    "that it was filled.", [
+    ("Agent", "Website", "1. agent reaches a sign-in page", ""),
+    ("Agent", "Vault", "2. list_secrets: item names + sites, no values", ""),
+    ("Agent", "Vault", "3. fill_secret: item name + field", ""),
+    ("Vault", "Vault", "checks: saved address, top frame, field kind", "note"),
+    ("Vault", "Bitwarden / Vaultwarden", "4. sync, decrypt on your machine", ""),
+    ("Vault", "Website", "5. types the password or code into the field", "key"),
+    ("Vault", "Agent", "6. \u201cfilled\u201d \u2014 never the value", ""),
+    ("Agent", "Website", "7. agent submits; sign-ins it can't fill go to take over", "note"),
+], lanes=[("Agent", 90, 96), ("Vault", 330, 150), ("Bitwarden / Vaultwarden", 560, 196), ("Website", 770, 96)])
+
+DIAGRAMS = {"seqt": APPROVAL, "seqt2": TAKEOVER, "seqt3": SAVED}
+
 if __name__ == "__main__":
     s = HOME.read_text()
-    new, n1 = re.subn(r'<svg viewBox="0 0 860 \d+" role="img" aria-labelledby="seqt">.*?</svg>', lambda m: APPROVAL, s, flags=re.S)
-    new, n2 = re.subn(r'<svg viewBox="0 0 860 \d+" role="img" aria-labelledby="seqt2">.*?</svg>', lambda m: TAKEOVER, new, flags=re.S)
-    if (n1, n2) != (1, 1):
-        sys.exit(f"expected one of each diagram, found {n1}, {n2}")
-    HOME.write_text(new)
-    print("home.html: both diagrams rewritten")
+    for sid, svg in DIAGRAMS.items():
+        s, n = re.subn(rf'<svg viewBox="0 0 860 \d+" role="img" aria-labelledby="{sid}">.*?</svg>', lambda m: svg, s, flags=re.S)
+        if n != 1:
+            sys.exit(f"expected one {sid} diagram in home.html, found {n}")
+    HOME.write_text(s)
+    print(f"home.html: {len(DIAGRAMS)} diagrams rewritten")
