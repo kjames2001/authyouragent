@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="512" y2="512">
+      <stop offset="0" stop-color="#14b8a6"/>
+      <stop offset="1" stop-color="#0d9488"/>
+    </linearGradient>
+  </defs>
+  <!-- tile -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g transform="translate(256 262) scale(0.96) translate(-256 -262)">
+  <g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
+    <!-- shield, mirror-symmetric about x=256 -->
+    <path stroke-width="20" d="M256 104 L368 146 V262 C368 336 320 386 256 418 C192 386 144 336 144 262 V146 Z"/>
+    <!-- fingerprint: concentric arcs, even 28px rhythm, one weight -->
+    <g stroke-width="14">
+      <path d="M178.1 225.7 A86 86 0 0 1 333.9 225.7"/>
+      <path d="M203.4 237.5 A58 58 0 0 1 308.6 237.5"/>
+      <path d="M228.8 249.3 A30 30 0 0 1 283.2 249.3"/>
+    </g>
+    <!-- check, same family weight -->
+    <path stroke-width="16" d="M220 312 L246 338 L292 292"/>
+  </g>
+  <circle cx="256" cy="262" r="11" fill="#fff"/>
+  <!-- approval badge: a background-coloured gap cuts the shield cleanly -->
+  <circle cx="368" cy="146" r="50" fill="url(#bg)"/>
+  <circle cx="368" cy="146" r="36" fill="#fff"/>
+  <path d="M352 147 L363 158 L385 136" fill="none" stroke="#0d9488" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
