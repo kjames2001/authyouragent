@@ -662,7 +662,9 @@ SENSITIVE = re.compile(
     r"add (comment|reply|review|key|email|account|payment|card|address))\b",
     re.I)
 # Labels that never need approval: steps of signing in, searching, cookie banners.
-HARMLESS = re.compile(r"^(sign|log) ?(in|up)$|^continue$|^next$|^search|cookie", re.I)
+# Names of pages, not actions: "Release history" is a tab, "Release payment" asks.
+HARMLESS = re.compile(r"^(sign|log) ?(in|up)$|^continue$|^next$|^search|cookie|"
+                      r"^(release|order|comment|report|booking|reservation)s? (history|notes|list|details)$", re.I)
 EXTRA = [w.strip() for w in os.environ.get("VAULT_APPROVE_WORDS", "").split(",") if w.strip()]
 APPROVAL_WAIT = 290
 
@@ -777,6 +779,7 @@ async def _watched(page, label, act):
     site = _site(urlparse(page.url).hostname)
     decision = None                      # future: "approved" / other
     held = asyncio.Event()
+    settled = []                         # one task per held request, done once it is aborted or let through
 
     async def handler(route, req):
         nonlocal decision
@@ -785,6 +788,7 @@ async def _watched(page, label, act):
         if decision is None:
             decision = asyncio.get_running_loop().create_future()
             held.set()
+        settled.append(asyncio.current_task())
         result = await decision
         if result == "approved":
             await route.fallback()
@@ -807,6 +811,12 @@ async def _watched(page, label, act):
     finally:
         if decision is not None and not decision.done():
             decision.set_result("cancelled")
+        # Let every held request be aborted (or let through) before the route
+        # goes: removing it first turns interception off, and Chromium then
+        # sends the paused request anyway.
+        pending = [t for t in settled if t is not asyncio.current_task() and not t.done()]
+        if pending:
+            await asyncio.wait(pending, timeout=5)
         await page.unroute("**/*", handler)
 
 
