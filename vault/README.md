@@ -74,11 +74,14 @@ authyouragent vault env      # print the env block again
   button on its pages, and confirms by the session cookie being cleared. When
   none works it reports "wiped locally, not signed out".
 - **Step-up approval reads the page and watches the click.** Every form
-  submit asks. A button whose words say nothing (an icon, "OK") is watched for
-  2 seconds after the click: a request that writes to the site (POST, PUT,
-  PATCH, DELETE, a GraphQL mutation) is held until you approve. Not caught: a
-  write the page sends later than that, or one sent to a different domain
-  (most such requests are analytics, so they are let through). Add words with
+  submit asks. A button whose words say nothing (an icon, "OK") is watched
+  after the click: a request that writes to the site (POST, PUT, PATCH,
+  DELETE, a GraphQL mutation) is held until you approve. The first write must
+  start within 2 seconds of the click; after that, every further write is held
+  too, until the page has been quiet for 0.6 seconds (at most 8 seconds), and
+  you are asked once for the whole run. Not caught: a first write that starts
+  more than 2 seconds after the click, or one sent to a different domain (most
+  such requests are analytics, so they are let through). Add words with
   `VAULT_APPROVE_WORDS`, and keep the agent's grants narrow.
 - **One session per vault.** Run one vault per owner session.
 - **Cookie binding.** Chrome's Device Bound Session Credentials (DBSC) will make

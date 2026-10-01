@@ -758,7 +758,9 @@ class NotApproved(Exception):
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 TELEMETRY = re.compile(r"/(collect|stats|telemetry|analytics|metrics|beacon|events?|log|logs|logging|"
                        r"track(ing)?|rum|csp-report|report-uri|_private/browser)(/|$|\?)|\bgen_204\b", re.I)
-WATCH_S = 2.0               # how long after a click a scripted write is caught
+WATCH_S = 2.0               # grace after the click: a first write must land within this
+WATCH_TAIL_S = 0.6          # keep watching this long after the LAST write (a cascade of saves)
+WATCH_CAP_S = 8.0           # never hold a click longer than this, no matter what
 
 
 def _is_write(req, page_site):
@@ -774,17 +776,22 @@ def _is_write(req, page_site):
 
 
 async def _watched(page, label, act):
-    """Run `act()`; hold scripted writes to the site that start within WATCH_S
-    and ask the owner once for all of them."""
+    """Run `act()`; hold scripted writes to the site and ask the owner once for
+    all of them. A first write must start within WATCH_S of the click; after
+    it, writes keep being held until the page has been quiet for WATCH_TAIL_S
+    (a run of saves is asked about as one), at most WATCH_CAP_S in all."""
     site = _site(urlparse(page.url).hostname)
     decision = None                      # future: "approved" / other
     held = asyncio.Event()
     settled = []                         # one task per held request, done once it is aborted or let through
+    last_write = [0.0]                   # monotonic time of the most recent held write
+    t0 = time.monotonic()
 
     async def handler(route, req):
         nonlocal decision
         if not _is_write(req, site):
             return await route.fallback()
+        last_write[0] = time.monotonic()        # every write restarts the quiet tail
         if decision is None:
             decision = asyncio.get_running_loop().create_future()
             held.set()
@@ -802,6 +809,10 @@ async def _watched(page, label, act):
             await asyncio.wait_for(held.wait(), WATCH_S)
         except asyncio.TimeoutError:
             return
+        # wait for the page to go quiet, so a run of writes is one question
+        while (time.monotonic() - last_write[0] < WATCH_TAIL_S
+               and time.monotonic() - t0 < WATCH_CAP_S):
+            await asyncio.sleep(0.05)
         what = f"{label or 'button'} (sends data to the site)"
         result = await _approve(page, what)
         decision.set_result(result)
