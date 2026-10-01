@@ -654,14 +654,27 @@ APPROVAL_WAIT = 290
 
 TARGET_JS = r"""(el) => {
   const text = s => (s || '').replace(/\s+/g, ' ').trim();
+  // The words on a button, without keyboard-shortcut hints that sites put
+  // inside it (GitHub: "Create ( control ⌃ enter ⏎ )").
+  const words = b => {
+    let t = b.innerText || '';
+    for (const k of b.querySelectorAll('kbd,[aria-hidden=true]')) {
+      const s = (k.innerText || '').trim();
+      if (s) t = t.replace(s, ' ');
+    }
+    t = t.replace(/\(([^()]*?)\)/g, (m, inner) =>
+      /^[\s]*$/.test(inner) || /control|ctrl|cmd|command|shift|enter|return|option|alt\b|[⌘⌃⇧⏎⌥↵]/i.test(inner) ? ' ' : m);
+    t = text(t.replace(/[⌘⌃⇧⏎⌥↵]/g, ' '));
+    return t || text(b.innerText);
+  };
   const btn = el.closest('button,a,[role=button],input[type=submit],input[type=button]') || el;
   const form = btn.form || btn.closest('form');
-  const label = text(btn.innerText || btn.value || btn.getAttribute('aria-label') || btn.title);
+  const label = text(words(btn) || btn.value || btn.getAttribute('aria-label') || btn.title);
   const isSubmit = !!form && (btn.type === 'submit' || (btn.tagName === 'BUTTON' && !btn.getAttribute('type')));
   let formSubmit = '';
   if (form) {
     const b = form.querySelector('button[type=submit],button:not([type]),input[type=submit]');
-    formSubmit = b ? text(b.innerText || b.value || b.getAttribute('aria-label')) : '';
+    formSubmit = b ? text(words(b) || b.value || b.getAttribute('aria-label')) : '';
   }
   // A form with exactly one password field is a sign-in form (a password
   // change has two or more).
