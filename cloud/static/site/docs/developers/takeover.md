@@ -64,6 +64,14 @@ What the vault enforces, whatever the agent does:
 
 For sites the agent signs in to often, a take over each time is too slow. The owner can instead share chosen sign-ins from their own **Bitwarden** or **Vaultwarden** with the vault. The agent asks the vault to fill a field; the vault types the value itself, and the agent never sees it. Authenticator codes work the same way: the vault computes the current code, and the key stays in the password manager.
 
+Saved sign-ins are optional. Without a password manager the vault works as before, and `list_secrets` and `fill_secret` answer that none is set up. With one, take over is still how the agent gets past everything a stored value cannot:
+
+- CAPTCHAs and "are you a robot" checks;
+- sites with no item in the shared folder;
+- codes sent by text message or email, and sign-in approvals on another device ("Check your phone");
+- passkeys and security keys;
+- sign-ins the owner prefers to do in person, such as banking.
+
 1. In the password manager, make a folder named **Auth Your Agent** and move into it only the sign-ins the agent may use. Each item needs the site's address. Items outside the folder, and items owned by an organization, are never read.
 2. Write a config file, readable only by you:
 
@@ -76,7 +84,7 @@ For sites the agent signs in to often, a take over each time is too slow. The ow
 
 `url` is your Vaultwarden address, or `https://vault.bitwarden.com` / `https://vault.bitwarden.eu`. The API key (**Account settings → Security → Keys → View API key**) is recommended, and needed if two-step login is on. The master password decrypts the items inside the vault and is never sent to the server.
 
-3. `authyouragent vault up --agent-id ag_... --key agent.pem --bitwarden bitwarden.json`. Later starts reuse it.
+3. `authyouragent vault up --agent-id ag_... --key agent.pem --bitwarden bitwarden.json`. Later starts reuse it. To stop using it, run `authyouragent vault down`, delete `~/.authyouragent/vault/bitwarden.json`, and start the vault again.
 
 The vault fills a value only when all of these hold:
 
