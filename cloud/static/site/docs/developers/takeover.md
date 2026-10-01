@@ -39,7 +39,7 @@ The agent gets eleven tools:
 
 | Tool | Purpose |
 |---|---|
-| `navigate`, `click`, `type_text`, `read_page` | Drive the vault's browser. Only public websites open. |
+| `navigate`, `click`, `type_text`, `read_page` | Drive the vault's browser. Only public websites open. Clicks that commit something wait for the owner's approval. |
 | `check_login_wall` | Is the page asking for a password, a CAPTCHA, a code or a sign-in approval? |
 | `request_takeover(reason)` | Ask the owner to take over. Returns `done`, `cancelled`, `expired` or `incomplete` with a line saying what to do next, or `waiting` with a `takeover_id` after `wait_seconds` (default 240). |
 | `wait_for_takeover(takeover_id)` | Keep waiting after `waiting`. |
@@ -52,7 +52,7 @@ The tools answer in plain text and read the page's fields and text, not screensh
 
 What the vault enforces, whatever the agent does:
 
-- **Step-up approval.** A click (or Enter) on a button that would submit, send, delete, pay, publish and the like first asks the owner on their phone. Sign-in forms are not interrupted. Add words with `VAULT_APPROVE_WORDS`.
+- **Step-up approval.** A click (or Enter) that submits a form, or on a button that says create, send, save, delete, pay, publish and the like, first asks the owner on their phone, showing the button's words. Search boxes and sign-in steps are not interrupted; "Authorize" and "Allow" on a sign-in page still ask. Add words with `VAULT_APPROVE_WORDS`.
 - **Public internet only.** Loopback, private networks, cloud metadata addresses and the vault's own ports are refused, checked on the resolved address.
 - **No internal browser pages**, `file://`, extensions, downloads or saved passwords.
 - **Chromium's sandbox on**, all container capabilities dropped; under gVisor automatically when Docker has the `runsc` runtime.

@@ -112,7 +112,7 @@ Node-based MCP clients can use `"command": "npx", "args": ["authyouragent-mcp"]`
 
 ### Your tools
 
-- **`navigate(url)`**, **`click(selector)`**, **`type_text(selector, text, submit)`**, **`read_page()`**: drive the vault's browser. Only public websites open. A click (or Enter) that would submit, send, delete, pay or publish first asks your user on their phone and waits; if they deny it, the tool says so and nothing happens. Sign-in forms are not interrupted.
+- **`navigate(url)`**, **`click(selector)`**, **`type_text(selector, text, submit)`**, **`read_page()`**: drive the vault's browser. Only public websites open; a local or private address returns "blocked by the vault". A click (or Enter) that submits a form, or whose button says create, send, save, delete, pay and the like, first asks your user on their phone and waits; if they deny it, the tool returns an error and nothing happens. Search boxes and sign-in steps are not interrupted.
 - **`check_login_wall`**: is the page asking for a password, a CAPTCHA, a code or a sign-in approval? If yes, it tells you to call `request_takeover`.
 - **`request_takeover(reason)`**: asks your user to take over. Returns `done`, `cancelled`, `expired` or `incomplete`, each with a line saying what to do next, or `waiting` with a `takeover_id` if your user needs longer.
 - **`wait_for_takeover(takeover_id)`**: keeps waiting after `waiting`.

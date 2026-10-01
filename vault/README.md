@@ -41,7 +41,7 @@ authyouragent vault env      # print the env block again
 |---|---|
 | Separate browser process, API only | The agent cannot read cookies or the browser's memory. The debug port exists only inside the container. |
 | Take over | Passwords, one-time codes and sign-in approvals are typed by you, on your phone. The agent's connection is closed while you are in control, and the phone viewer can only send taps and plain text (no keyboard shortcuts). |
-| Step-up approval | Before a click (or Enter) that would submit, send, delete, pay, publish and similar, the vault asks you on your phone and waits. The agent cannot skip it: every click goes through the vault. Sign-in forms are not interrupted. Add your own words with `VAULT_APPROVE_WORDS=transfer,wire`. |
+| Step-up approval | Before a click (or Enter) that submits a form, or on a button that says create, send, save, delete, pay, publish and similar, the vault asks you on your phone and waits. The request shows the button's words. The agent cannot skip it: every click goes through the vault. Search boxes and sign-in steps (password, code, "Verify") are not interrupted; "Authorize" and "Allow" on a sign-in page still ask. Add your own words with `VAULT_APPROVE_WORDS=transfer,wire`. |
 | Egress filter | The browser reaches only the public internet. Loopback, private networks, link-local (cloud metadata), CGNAT and the vault's own ports are refused. Checked on the resolved address, so DNS tricks do not help. |
 | Browser policy | No internal pages (`chrome://settings`, downloads...), no `file://`, no extensions, no downloads, no saved passwords or autofill. |
 | Chromium sandbox | Always on. Each page runs in its own restricted process. `vault up` supplies the seccomp profile this needs; no extra privileges are granted and all capabilities are dropped. |
@@ -67,9 +67,10 @@ authyouragent vault env      # print the env block again
   site's published OpenID Connect sign-out endpoint, then a "Sign out" link or
   button on its pages, and confirms by the session cookie being cleared. When
   none works it reports "wiped locally, not signed out".
-- **Step-up approval works on the wording.** A button whose label does not
-  say what it does (an icon, "OK") can pass without approval. Add words with
-  `VAULT_APPROVE_WORDS`, and keep the agent's grants narrow.
+- **Step-up approval reads the page.** Every form submit asks, but a button
+  outside a form that sends its request from a script, with a label that does
+  not say what it does (an icon, "OK"), can pass without approval. Add words
+  with `VAULT_APPROVE_WORDS`, and keep the agent's grants narrow.
 - **One session per vault.** Run one vault per owner session.
 - **Cookie binding.** Chrome's Device Bound Session Credentials (DBSC) will make
   stolen cookies useless on other machines, but it needs a TPM and is Windows-only

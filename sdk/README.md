@@ -32,8 +32,9 @@ For just the SDK (no browser, no MCP): `pip install authyouragent`.
 
 The `authyouragent-mcp` command starts an MCP server with eleven tools:
 
-- **Browser:** `navigate`, `click`, `type_text`, `read_page`. Clicks that
-  submit, send, delete, pay or publish wait for your approval on your phone.
+- **Browser:** `navigate`, `click`, `type_text`, `read_page`. Only public
+  websites open. Clicks that submit a form, or whose button says create, send,
+  save, delete, pay and the like, wait for your approval on your phone.
 - **`check_login_wall`**: is the page asking for a password, a code or a
   sign-in approval?
 - **`request_takeover`** / **`wait_for_takeover`**: you take over the browser

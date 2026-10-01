@@ -25,7 +25,7 @@ The phone app and the approval service run at authyouragent.com. The agent signs
 
 | Tool | What it does |
 |---|---|
-| `navigate`, `click`, `type_text`, `read_page` | Drive the vault's browser. Only public websites open. Clicks that submit, send, delete, pay or publish ask the owner's phone first. |
+| `navigate`, `click`, `type_text`, `read_page` | Drive the vault's browser. Only public websites open. Clicks that submit a form, or whose button says create, send, save, delete, pay and the like, ask the owner's phone first. |
 | `check_login_wall` | Is the page blocked by a password, CAPTCHA, one-time code or sign-in approval? Reads the page's fields and text, so the model needs no vision. |
 | `request_takeover` | Ask the owner to take over the browser from their phone. Returns `done`, `cancelled`, `expired`, `incomplete`, or `waiting`. |
 | `wait_for_takeover` | Keep waiting after `waiting`. |

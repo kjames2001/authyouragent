@@ -54,7 +54,7 @@ type_text(selector: "#search", text: "order 1234", submit: true)
 ```
 
 - Only public websites open. Local and private addresses are refused.
-- A click (or Enter) that would submit, send, delete, pay or publish first asks your owner on their phone and waits. If they deny it, the tool says so and nothing happens. Sign-in forms are not interrupted.
+- A click (or Enter) that submits a form, or whose button says create, send, save, delete, pay and the like, first asks your owner on their phone and waits (up to about five minutes). If they deny it, the tool returns an error and nothing happens. Search boxes and sign-in steps are not interrupted.
 - Never type your owner's passwords or codes. Ask for a take over instead.
 
 ### check_login_wall
@@ -90,7 +90,7 @@ wait_for_takeover(takeover_id: "tk_...")
 
 ### request_approval
 
-**When:** You are about to do something sensitive that the vault cannot see for itself: an action outside the browser, or a button whose wording does not show what it does.
+**When:** You are about to do something sensitive that the vault cannot see for itself: an action outside the browser, or a button that is not in a form and whose wording does not show what it does (an icon, "OK").
 
 ```
 request_approval(site: "github.com", action: "delete repository test-repo")
