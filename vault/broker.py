@@ -70,14 +70,14 @@ READ_JS = r"""(max) => {
       || (/^(LI|TD|TH|DT|DD|BLOCKQUOTE)$/.test(tag) && !el.querySelector('p'));
     if (!block && t.length >= 500) continue;
     seen.add(t); out.push(t); size += t.length + 1;
-    if (size > max) return out.join('\\n');
+    if (size > max) return out.join('\n');
   }
   // Collected everything and it is still a small part of the page: its text
   // sits outside those elements (plain <div>s, a bare text/JSON document).
   // Fall back to everything the page shows rather than reporting it empty.
   const all = ((document.body && document.body.innerText) || '').trim();
   if (all && size < all.length / 4) return all.slice(0, max);
-  return out.join('\\n');
+  return out.join('\n');
 }"""
 
 # Sign-out routes for providers whose session is worth ending explicitly.
