@@ -1,0 +1,10 @@
+{
+  "name": "authyouragent-demo-shop",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@auth/express": "0.12.3",
+    "express": "^4.21.2",
+    "jose": "^6.1.0"
+  }
+}

@@ -42,6 +42,7 @@ To show owners that the site is really yours, publish the verification line from
 | `phone_number` | The owner's phone, with the `phone` scope and approval. Verified. |
 | `amr` | `["agent", "passkey"]` when the owner approved this sign-in on their phone, `["agent", "grant"]` when an earlier approval covered it. `"password"` or `"google"` / `"microsoft"` if the owner approved another way. |
 | `auth_time` | When the owner last approved. |
+| `sid` | This sign-in. A sign-out notice names it (see below). |
 
 Signing algorithm: RS256. Response type: `code`. PKCE (S256) is supported and required for public clients.
 
@@ -50,6 +51,15 @@ Signing algorithm: RS256. Response type: `code`. PKCE (S256) is supported and re
 For a sign-in that should always reach the owner's phone, send `prompt=login`, or `max_age=0`. A recent approval within `max_age` seconds also counts. A fresh approval needs the owner's passkey or Google/Microsoft sign-in; a password is not enough.
 
 `prompt=none` never shows a card: it answers `login_required` or `consent_required` when an approval would be needed.
+
+### When the owner revokes
+
+Revoking in the app stops new sign-ins at once. To end a session your site **already** started, use either or both of these standard mechanisms:
+
+- **Sign-out address (recommended).** In *Your websites*, enter a sign-out address on your own domain, for example `https://your-site/auth/backchannel-logout`. When the owner revokes the agent, we POST a `logout_token` there within seconds ([OpenID Connect Back-Channel Logout 1.0](https://openid.net/specs/openid-connect-backchannel-1_0.html)). Verify it against our keys (issuer, your client ID as audience, `typ` `logout+jwt`, the back-channel-logout event, no `nonce`), then end the session whose `sid` it names, and answer 200. Failed deliveries are retried for about 15 minutes. Keycloak, Authentik and many OIDC libraries support this already.
+- **Refresh tokens.** Every sign-in also returns a `refresh_token`. Access tokens last 10 minutes. If your site refreshes them, the refresh fails with `invalid_grant` once the owner has revoked: end the session then. Refresh tokens rotate on every use, and reusing an old one ends that sign-in.
+
+When your site signs the agent out itself, send its refresh token to `/oidc/revoke` ([RFC 7009](https://www.rfc-editor.org/rfc/rfc7009)). A sign-in lasts at most 30 days before the agent must sign in again.
 
 ### Auth.js (Next.js, Express, SvelteKit)
 
@@ -66,6 +76,8 @@ providers: [{
 ```
 
 Callback address: `https://your-site/api/auth/callback/authyouragent` (Next.js) or `https://your-site/auth/callback/authyouragent` (Express).
+
+To end sessions when the owner revokes, keep the tokens in the `jwt` callback and refresh them ([Auth.js refresh-token rotation guide](https://authjs.dev/guides/refresh-token-rotation)), and add a sign-out address. Demo Shop does both in about 30 lines: [source](https://github.com/kjames2001/authyouragent/tree/main/examples/demo-shop).
 
 ### Keycloak, Authentik and other identity servers
 
@@ -98,7 +110,7 @@ session.get(redirect)                         # your HTTP session completes the 
 
 ### Limits
 
-- Revoking an agent stops new sign-ins and `/oidc/userinfo` at once. A session your site already started lasts as long as your site keeps it. Re-check with `/oidc/userinfo` or keep sessions short if that matters to you.
+- Revoking an agent stops new sign-ins, refreshes and `/oidc/userinfo` at once. Sessions your site already started end only if your site uses a sign-out address or refreshes its tokens (see *When the owner revokes*). A site that does neither keeps its session until that session expires.
 - Only the authorization code flow is supported.
 
 ## Option 2: Per-request verification
