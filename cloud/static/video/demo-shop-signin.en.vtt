@@ -1,0 +1,19 @@
+WEBVTT
+
+00:00.200 --> 00:07.075
+An AI agent opens Demo Shop, an ordinary website built with Auth JS.
+
+00:07.475 --> 00:14.550
+It picks Sign in with Auth Your Agent. No password. It proves itself with its own key.
+
+00:14.950 --> 00:21.200
+The first time, the owner's phone gets a card. This wait took fifteen seconds.
+
+00:21.600 --> 00:27.475
+James approves with a passkey, and the agent is signed in, as his agent.
+
+00:27.875 --> 00:31.750
+Later, it signs out, and signs in again.
+
+00:32.150 --> 00:38.400
+No tap this time. The earlier approval covers it, until James revokes it.
