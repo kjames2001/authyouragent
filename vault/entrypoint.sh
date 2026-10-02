@@ -7,9 +7,15 @@ SCREEN=$(python3 -c "
 w,h=map(int,'$SIZE'.split('x')); s=float('$SCALE')
 if w<500: w,h=500,round(h*500/w)   # Chromium's minimum window width
 print(f'{round(w*s)}x{round(h*s)}')")
-# A container restart (host reboot, crash) keeps /tmp, so Xvfb would find its
-# old lock and refuse to start. Nothing else uses display :0 in this container.
-rm -f /tmp/.X0-lock /tmp/.X11-unix/X0
-Xvfb :0 -screen 0 "${SCREEN}x24" -nolisten tcp &
+# Keep the display up: Xvfb can be killed from outside (a `pkill Xvfb` on the
+# host also matches this container's), and Chromium dies with its display.
+# The broker restarts Chromium once the display is back (Vault.ensure_chrome).
+# Each start clears the old lock, which a dead Xvfb (or a container restart,
+# which keeps /tmp) leaves behind. Nothing else uses display :0 here.
+(while :; do
+    rm -f /tmp/.X0-lock /tmp/.X11-unix/X0
+    Xvfb :0 -screen 0 "${SCREEN}x24" -nolisten tcp
+    sleep 1
+done) &
 export DISPLAY=:0
 exec python3 /app/broker.py

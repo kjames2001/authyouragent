@@ -62,17 +62,22 @@ WAIT_MAX = 290
 READ_JS = r"""(max) => {
   const out = [], seen = new Set();
   let size = 0;
-  for (const el of document.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,button,label,a,td,th,span')) {
+  for (const el of document.querySelectorAll('h1,h2,h3,h4,h5,h6,p,pre,blockquote,li,dt,dd,button,label,a,td,th,span')) {
     const t = (el.innerText || '').trim();
     if (!t || seen.has(t)) continue;
     const tag = el.tagName;
-    const block = /^(H[1-6]|P)$/.test(tag)
-      || (/^(LI|TD|TH)$/.test(tag) && !el.querySelector('p'));
+    const block = /^(H[1-6]|P|PRE)$/.test(tag)
+      || (/^(LI|TD|TH|DT|DD|BLOCKQUOTE)$/.test(tag) && !el.querySelector('p'));
     if (!block && t.length >= 500) continue;
     seen.add(t); out.push(t); size += t.length + 1;
-    if (size > max) break;
+    if (size > max) return out.join('\\n');
   }
-  return out.join('\n');
+  // Collected everything and it is still a small part of the page: its text
+  // sits outside those elements (plain <div>s, a bare text/JSON document).
+  // Fall back to everything the page shows rather than reporting it empty.
+  const all = ((document.body && document.body.innerText) || '').trim();
+  if (all && size < all.length / 4) return all.slice(0, max);
+  return out.join('\\n');
 }"""
 
 # Sign-out routes for providers whose session is worth ending explicitly.
@@ -317,6 +322,7 @@ class Vault:
         self.last_ping = time.time()
         self.in_takeover = False
         self.lock = asyncio.Lock()
+        self.chrome_lock = asyncio.Lock()
         self.jobs = {}
         self._agent = None
 
@@ -366,6 +372,33 @@ class Vault:
                     pass
         raise RuntimeError("chromium did not start")
 
+    async def ensure_chrome(self):
+        """Restart Chromium if it has died (most often because its display was
+        killed from outside). The profile is kept, so sign-ins survive."""
+        async with self.chrome_lock:
+            if self.chrome and self.chrome.returncode is None:
+                return
+            _log("browser had stopped (exit", self.chrome.returncode if self.chrome else None,
+                 "), restarting it")
+            await self.detach()
+            x = "/tmp/.X11-unix/X" + DISPLAY.lstrip(":").split(".")[0]
+            for _ in range(40):                     # the display restarts within ~1s
+                if os.path.exists(x):
+                    break
+                await asyncio.sleep(0.25)
+            for pid in _procs_using(self.profile) if self.profile else ():
+                try:
+                    os.kill(pid, 9)                 # orphaned helpers would hold the profile
+                except OSError:
+                    pass
+            if self.profile:
+                for f in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+                    try:
+                        os.unlink(os.path.join(self.profile, f))
+                    except OSError:
+                        pass
+            await self.start_chrome(keep_profile=True)
+
     async def stop_chrome(self):
         await self.detach()
         if self.chrome and self.chrome.returncode is None:
@@ -409,8 +442,10 @@ class Vault:
     async def attach(self):
         if self.in_takeover:
             raise Busy("the owner is in control of the browser (take over in progress)")
+        await self.ensure_chrome()
         if self.browser and self.browser.is_connected() and self.page and not self.page.is_closed():
             return self.page
+        await self.detach()
         self.browser = await self.pw.chromium.connect_over_cdp(CDP)
         ctx = self.browser.contexts[0]
         self.page = ctx.pages[-1] if ctx.pages else await ctx.new_page()
@@ -428,6 +463,7 @@ class Vault:
     async def peek(self, fn):
         """Attach for one short look while the owner is in control, then let go.
         Used only on the site's own pages, never on a sign-in step."""
+        await self.ensure_chrome()
         browser = await self.pw.chromium.connect_over_cdp(CDP)
         try:
             ctx = browser.contexts[0]
@@ -597,6 +633,11 @@ class Vault:
         last_record = 0
         while True:
             await asyncio.sleep(5)
+            if not self.in_takeover and self.chrome and self.chrome.returncode is not None:
+                try:
+                    await self.ensure_chrome()
+                except Exception as e:
+                    _log("browser restart failed:", e)
             if self.used and not self.in_takeover and time.time() - last_record > 15:
                 last_record = time.time()
                 await self.record_signed_in()
