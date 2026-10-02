@@ -80,13 +80,13 @@ def _seccomp():
     return p
 
 
-def _key_copy(key):
-    """The vault runs as uid 10001. Give it its own copy of the key, readable
-    only by that uid (falls back to 0644 when we cannot chown, e.g. rootless)."""
-    src = Path(key).expanduser()
-    if not src.is_file():
-        _die(f"agent key not found: {src}")
-    dst = HOME / "agent.pem"
+def _vault_copy(src, name):
+    """Copy src to HOME/name, readable only by the vault user (uid 10001;
+    falls back to 0644 when we cannot chown, e.g. rootless). When src already
+    is that copy (from an earlier `vault up`), it is used as it is."""
+    dst = HOME / name
+    if dst.exists() and src.resolve() == dst.resolve():
+        return dst
     shutil.copyfile(src, dst)
     try:
         os.chown(dst, VAULT_UID, VAULT_UID)
@@ -94,6 +94,14 @@ def _key_copy(key):
     except PermissionError:
         dst.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
     return dst
+
+
+def _key_copy(key):
+    """The vault runs as uid 10001. Give it its own copy of the key."""
+    src = Path(key).expanduser()
+    if not src.is_file():
+        _die(f"agent key not found: {src}")
+    return _vault_copy(src, "agent.pem")
 
 
 def _bitwarden_copy(path):
@@ -108,14 +116,7 @@ def _bitwarden_copy(path):
     missing = [k for k in ("url", "email", "master_password") if not cfg.get(k)]
     if missing:
         _die(f"bitwarden config is missing: {', '.join(missing)}")
-    dst = HOME / "bitwarden.json"
-    shutil.copyfile(src, dst)
-    try:
-        os.chown(dst, VAULT_UID, VAULT_UID)
-        dst.chmod(0o400)
-    except PermissionError:
-        dst.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
-    return dst
+    return _vault_copy(src, "bitwarden.json")
 
 
 def _state_dir():
