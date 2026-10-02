@@ -15,5 +15,11 @@ James approves with a passkey, and the agent is signed in, as his agent.
 00:27.875 --> 00:31.750
 Later, it signs out, and signs in again.
 
-00:32.150 --> 00:38.400
-No tap this time. The earlier approval covers it, until James revokes it.
+00:32.150 --> 00:36.650
+No tap this time. The earlier approval covers it.
+
+00:37.050 --> 00:40.475
+Now James revokes it, from his phone.
+
+00:40.875 --> 00:49.125
+One second later, Demo Shop has signed the agent out. Revoking ends sessions a site already started.
