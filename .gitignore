@@ -28,6 +28,7 @@ cloud/main.py
 cloud/site_pages.py
 cloud/takeover.py
 cloud/oidc.py
+cloud/wba.py
 cloud/static/index.html
 cloud/static/takeover.html
 cloud/static/sw.js

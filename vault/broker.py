@@ -40,6 +40,7 @@ from playwright.async_api import async_playwright
 import bitwarden
 import egress
 from authyouragent.agent import AgentClient
+from authyouragent import webbotauth
 from authyouragent.takeover import BLOCKING_JS, login_finished
 
 CHROME = shutil.which("chromium") or "/usr/bin/chromium"
@@ -138,6 +139,11 @@ LOGOUT_JS = r"""() => {
 # the vault works the same but cannot report sites left signed in.
 STATE_DIR = os.environ.get("VAULT_STATE_DIR", "/var/lib/vault")
 SIGNED_IN_FILE = os.path.join(STATE_DIR, "signed-in.json")      # site names only, never cookies
+WBA_KEY_FILE = os.path.join(STATE_DIR, "web-bot-auth.pem")      # this vault's own Web Bot Auth key
+# Web Bot Auth: sign every request so websites can recognise this agent. On by
+# default; VAULT_WEB_BOT_AUTH=off sends requests unsigned.
+WBA_ON = os.environ.get("VAULT_WEB_BOT_AUTH", "on").strip().lower() not in ("0", "off", "false", "no")
+WBA_HEADERS = {"signature", "signature-input", "signature-agent"}
 LEARNED_FILE = os.path.join(STATE_DIR, "signout-routes.json")   # sign-out urls that worked
 
 
@@ -331,6 +337,9 @@ class Vault:
         self.chrome_lock = asyncio.Lock()
         self.jobs = {}
         self._agent = None
+        self.wba_key = None          # Ed25519 key, set once the cloud publishes it
+        self.wba_agent = None        # Signature-Agent address (https://<label>.agents...)
+        self.wba_next = 0
 
     # ── agent credentials (take over, revocation checks) ──
     def agent(self):
@@ -342,6 +351,64 @@ class Vault:
             self._agent = AgentClient(base_url=os.environ.get("AYA_CLOUD", "https://authyouragent.com"),
                                       agent_id=aid, privkey_pem=open(kf).read())
         return self._agent
+
+    # ── Web Bot Auth ──
+    # The vault keeps its own Ed25519 key (never the agent key) in its state
+    # directory. The cloud publishes the public half at a per-agent address
+    # with this vault's possession proof, and empties that list when the owner
+    # revokes the agent. The cloud never sees the signed requests.
+    def _wba_load(self, fresh=False):
+        if not fresh and os.path.exists(WBA_KEY_FILE):
+            try:
+                return webbotauth.key_from_pem(open(WBA_KEY_FILE).read())
+            except Exception as e:
+                _log("web bot auth: unreadable key, making a new one:", type(e).__name__)
+        key = webbotauth.new_key()
+        try:
+            fd = os.open(WBA_KEY_FILE + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(webbotauth.key_to_pem(key))
+            os.replace(WBA_KEY_FILE + ".tmp", WBA_KEY_FILE)
+        except OSError as e:          # no state volume: the key lives until restart
+            _log("web bot auth: key not saved:", type(e).__name__)
+        return key
+
+    def _wba_publish(self):
+        agent = self.agent()
+        key = self._wba_load()
+        for attempt in (0, 1):
+            r = agent.client.post(f"{agent.base}/api/v1/wba/key", json={
+                "agent_id": agent.agent_id, "agent_jwt": agent._agent_jwt(),
+                "jwk": webbotauth.public_jwk(key)})
+            if r.status_code == 409 and attempt == 0:      # key belongs to another agent id
+                key = self._wba_load(fresh=True)
+                continue
+            if r.status_code != 200:
+                raise RuntimeError(f"key not published ({r.status_code}): {r.text[:160]}")
+            break
+        info = r.json()
+        proof = webbotauth.sign_directory(key, info["directory"].encode(), info["host"])
+        r = agent.client.post(f"{agent.base}/api/v1/wba/proof", json={
+            "agent_id": agent.agent_id, "agent_jwt": agent._agent_jwt(), "headers": proof})
+        if r.status_code != 200:
+            raise RuntimeError(f"proof refused ({r.status_code}): {r.text[:160]}")
+        return key, info["signature_agent"]
+
+    async def wba_refresh(self):
+        if not WBA_ON or time.time() < self.wba_next:
+            return
+        try:
+            self.agent()
+        except Exception:
+            self.wba_next = time.time() + 3600        # no agent credentials
+            return
+        try:
+            self.wba_key, self.wba_agent = await asyncio.to_thread(self._wba_publish)
+            self.wba_next = time.time() + 2 * 86400   # the proof is good for 7 days
+            _log("web bot auth: signing requests as", self.wba_agent)
+        except Exception as e:
+            self.wba_next = time.time() + 600
+            _log("web bot auth not ready:", str(e)[:200])
 
     # ── browser lifecycle ──
     async def start_chrome(self, url="about:blank", keep_profile=False):
@@ -484,21 +551,31 @@ class Vault:
 
         async def paused(ev):
             req = ev["request"]
+            # A page cannot supply these itself: the vault alone adds them.
             hs = [{"name": k, "value": v} for k, v in req["headers"].items()
-                  if k.lower() != "x-authyouragent-agent"]
+                  if k.lower() != "x-authyouragent-agent" and k.lower() not in WBA_HEADERS]
             u = urlparse(req["url"])
-            if f"{u.scheme}://{u.netloc}{u.path}" == prefix and req["method"] == "GET":
+            if (f"{u.scheme}://{u.netloc}{u.path}" == prefix and req["method"] == "GET"
+                    and ev.get("resourceType") == "Document"):
                 hs.append({"name": "X-AuthYourAgent-Agent", "value": agent.oidc_header(req["url"])})
                 self.used = True
                 _log(f"sign in with Auth Your Agent: proof added for {u.netloc}")
+            if self.wba_key and self.wba_agent and u.scheme in ("http", "https"):
+                try:
+                    for k, v in webbotauth.sign_request(self.wba_key, req["method"], req["url"],
+                                                        self.wba_agent).items():
+                        hs.append({"name": k, "value": v})
+                except Exception as e:
+                    _log("web bot auth: request not signed:", type(e).__name__)
             try:
                 await cdp.send("Fetch.continueRequest", {"requestId": ev["requestId"], "headers": hs})
             except Exception:
                 pass
 
         cdp.on("Fetch.requestPaused", lambda ev: asyncio.ensure_future(paused(ev)))
-        await cdp.send("Fetch.enable", {"patterns": [
-            {"urlPattern": prefix + "*", "resourceType": "Document", "requestStage": "Request"}]})
+        pattern = ({"urlPattern": "*", "requestStage": "Request"} if WBA_ON else
+                   {"urlPattern": prefix + "*", "resourceType": "Document", "requestStage": "Request"})
+        await cdp.send("Fetch.enable", {"patterns": [pattern]})
 
     def _on_nav(self, frame):
         if self.page and frame == self.page.main_frame:
@@ -680,6 +757,7 @@ class Vault:
         last_record = 0
         while True:
             await asyncio.sleep(5)
+            await self.wba_refresh()
             if not self.in_takeover and self.chrome and self.chrome.returncode is not None:
                 try:
                     await self.ensure_chrome()
@@ -735,7 +813,8 @@ async def _where(page):
 
 async def status(request):
     return web.json_response({"attached": bool(V.browser), "in_takeover": V.in_takeover,
-                              "session_active": V.used, "lease_s": LEASE_S})
+                              "session_active": V.used, "lease_s": LEASE_S,
+                              "web_bot_auth": V.wba_agent if V.wba_key else None})
 
 
 async def ping(request):
@@ -1189,6 +1268,7 @@ async def on_startup(app):
     app["egress"] = await egress.start()
     await asyncio.to_thread(V.report_crash)
     V.pw = await async_playwright().start()
+    await V.wba_refresh()
     await V.start_chrome()
     app["watchdog"] = asyncio.create_task(V.watchdog())
 

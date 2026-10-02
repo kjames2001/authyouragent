@@ -98,6 +98,7 @@ authyouragent vault env      # print the env block again
 | `VAULT_SCALE` | `2` | device pixel ratio |
 | `VAULT_LEASE_S` | `90` | end the session if the agent is silent this long |
 | `VAULT_APPROVE_WORDS` | | extra words that need your approval |
+| `VAULT_WEB_BOT_AUTH` | `on` | sign every request under [Web Bot Auth](https://authyouragent.com/docs/developers/web-bot-auth) with this vault's own key; `off` sends requests unsigned |
 | `AYA_VAULT_IMAGE` | `ghcr.io/kjames2001/authyouragent-vault:latest` | image `vault up` runs |
 
 Run it by hand (what `vault up` does):
