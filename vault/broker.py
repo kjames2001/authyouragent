@@ -60,16 +60,22 @@ WAIT_MAX = 290
 # buttons, labels and spans can wrap whole sections, so they are only taken
 # when short, which keeps a wrapper from repeating everything inside it.
 READ_JS = r"""(max) => {
-  const out = [], seen = new Set();
+  const out = [], seen = new Set(), taken = new Set();
   let size = 0;
+  // Already read as part of a block taken earlier (a link or the per-letter
+  // <span>s some pages wrap words in): its text is in that block's line.
+  const inTaken = (el) => {
+    for (let a = el.parentElement; a; a = a.parentElement) if (taken.has(a)) return true;
+    return false;
+  };
   for (const el of document.querySelectorAll('h1,h2,h3,h4,h5,h6,p,pre,blockquote,li,dt,dd,button,label,a,td,th,span')) {
     const t = (el.innerText || '').trim();
-    if (!t || seen.has(t)) continue;
+    if (!t || seen.has(t) || inTaken(el)) continue;
     const tag = el.tagName;
     const block = /^(H[1-6]|P|PRE)$/.test(tag)
       || (/^(LI|TD|TH|DT|DD|BLOCKQUOTE)$/.test(tag) && !el.querySelector('p'));
     if (!block && t.length >= 500) continue;
-    seen.add(t); out.push(t); size += t.length + 1;
+    seen.add(t); taken.add(el); out.push(t); size += t.length + 1;
     if (size > max) return out.join('\n');
   }
   // Collected everything and it is still a small part of the page: its text
