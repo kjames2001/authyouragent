@@ -1,5 +1,108 @@
 # Accepting agents on your site
 
+There are two ways. Most sites want the first.
+
+1. **Sign in with Auth Your Agent** (OpenID Connect). Add it to your login page like "Sign in with Google". No Auth Your Agent code on your site: your login library already speaks the standard. The agent gets a normal session on your site, approved by its owner on their phone.
+2. **Per-request verification** (`SiteVerifier`). For APIs that agents call directly. Every request is checked, and revocation takes effect on the next request.
+
+## Option 1: Sign in with Auth Your Agent
+
+### What happens
+
+1. An agent opens your login page and picks **Sign in with Auth Your Agent**.
+2. Your login library sends it to Auth Your Agent, as it would to any OpenID provider.
+3. The agent proves who it is with its own key. The first time it signs in to your site, its owner approves on their phone. Later sign-ins go through while that approval stands.
+4. Your site receives a standard ID token and signs the agent in.
+
+A person who clicks the button by mistake sees a page explaining that it is for AI agents. No password is ever asked for.
+
+### Register your site
+
+In the app: **Sites → Your websites → Register a website**. Give a name and your login library's callback address. You get:
+
+| Setting | Value |
+|---|---|
+| Issuer | `https://authyouragent.com` |
+| Client ID | `c_…` |
+| Client secret | shown once; you can make a new one at any time |
+
+Discovery document: `https://authyouragent.com/.well-known/openid-configuration`.
+
+To show owners that the site is really yours, publish the verification line from the app at `https://your-site/.well-known/authyouragent-site.txt` and press **Check**. Until then the owner's approval card says the site is not verified.
+
+### What you receive
+
+| Claim | Meaning |
+|---|---|
+| `sub` | The **owner** the agent acts for. Different on every site, stable on yours. |
+| `act.sub` | The **agent**. Also different on every site. Store `sub` and `act.sub` together: one owner may send several agents. |
+| `act.name`, `agent_name` | The agent's name, for example `Jarvis`. |
+| `name` | Display name, for example `Jarvis (agent of James)`. |
+| `email` | The owner's email, only if you request the `email` scope and the owner approves sharing it. Not verified by Auth Your Agent. |
+| `phone_number` | The owner's phone, with the `phone` scope and approval. Verified. |
+| `amr` | `["agent", "passkey"]` when the owner approved this sign-in on their phone, `["agent", "grant"]` when an earlier approval covered it. `"password"` or `"google"` / `"microsoft"` if the owner approved another way. |
+| `auth_time` | When the owner last approved. |
+
+Signing algorithm: RS256. Response type: `code`. PKCE (S256) is supported and required for public clients.
+
+### Asking for a fresh approval
+
+For a sign-in that should always reach the owner's phone, send `prompt=login`, or `max_age=0`. A recent approval within `max_age` seconds also counts. A fresh approval needs the owner's passkey or Google/Microsoft sign-in; a password is not enough.
+
+`prompt=none` never shows a card: it answers `login_required` or `consent_required` when an approval would be needed.
+
+### Auth.js (Next.js, Express, SvelteKit)
+
+```js
+providers: [{
+  id: "authyouragent",
+  name: "Auth Your Agent",
+  type: "oidc",
+  issuer: "https://authyouragent.com",
+  clientId: process.env.AYA_CLIENT_ID,
+  clientSecret: process.env.AYA_CLIENT_SECRET,
+  authorization: { params: { scope: "openid profile email" } },
+}]
+```
+
+Callback address: `https://your-site/api/auth/callback/authyouragent` (Next.js) or `https://your-site/auth/callback/authyouragent` (Express).
+
+### Keycloak, Authentik and other identity servers
+
+Add an **OpenID Connect** identity provider with discovery URL `https://authyouragent.com/.well-known/openid-configuration`, the client ID and secret, client authentication "client secret sent as basic auth", and scopes `openid profile`. Use the callback address the server shows you when registering.
+
+### WordPress
+
+With the [OpenID Connect Generic Client](https://wordpress.org/plugins/daggerhart-openid-connect-generic/) plugin: Login type "button", scope `openid profile email`, endpoints from the discovery document above (`/oidc/authorize`, `/oidc/token`, `/oidc/userinfo`), identity key `sub`, nickname key `agent_name`. Callback address: `https://your-site/wp-admin/admin-ajax.php?action=openid-connect-authorize`.
+
+### Django (django-allauth)
+
+```python
+SOCIALACCOUNT_PROVIDERS = {"openid_connect": {"APPS": [{
+    "provider_id": "authyouragent", "name": "Auth Your Agent",
+    "client_id": "c_...", "secret": "...",
+    "settings": {"server_url": "https://authyouragent.com"},
+}]}}
+```
+
+Callback address: `https://your-site/accounts/oidc/authyouragent/login/callback/`.
+
+### For agent developers
+
+The Auth Your Agent vault adds the agent's proof to the sign-in on its own. Without the vault, the Python SDK does the sign-in in one call:
+
+```python
+redirect = agent.oidc_signin(authorize_url)   # waits for the phone when needed
+session.get(redirect)                         # your HTTP session completes the sign-in
+```
+
+### Limits
+
+- Revoking an agent stops new sign-ins and `/oidc/userinfo` at once. A session your site already started lasts as long as your site keeps it. Re-check with `/oidc/userinfo` or keep sessions short if that matters to you.
+- Only the authorization code flow is supported.
+
+## Option 2: Per-request verification
+
 Your site receives HTTP requests from agents. Each request carries two headers:
 
 - `Authorization: Bearer <access token>`: a signed pass saying which agent is acting, for which person, on your site, with which permissions. It lasts 10 minutes.

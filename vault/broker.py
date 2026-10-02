@@ -455,9 +455,50 @@ class Vault:
         self.browser = await self.pw.chromium.connect_over_cdp(CDP)
         ctx = self.browser.contexts[0]
         self.page = ctx.pages[-1] if ctx.pages else await ctx.new_page()
+        for p in ctx.pages:
+            await self._oidc_hook(p)
+        ctx.on("page", lambda p: asyncio.ensure_future(self._oidc_hook(p)))
         self.page.on("framenavigated", self._on_nav)
         self._on_nav(self.page.main_frame)
         return self.page
+
+    # ── Sign in with Auth Your Agent ──
+    # When a site's "Sign in with Auth Your Agent" sends the browser to the
+    # cloud's /oidc/authorize, the vault adds the agent's proof: a short JWT
+    # signed with the agent key and bound to that exact address. The browser
+    # usually arrives there through the site's redirect, which Playwright's
+    # route does not see, so this uses CDP Fetch on each page directly.
+    # Only the configured cloud's authorize address gets the header.
+    async def _oidc_hook(self, page):
+        try:
+            agent = self.agent()
+        except Exception:
+            return                      # no agent credentials: nothing to add
+        cloud = urlparse(agent.base)
+        prefix = f"{cloud.scheme}://{cloud.netloc}/oidc/authorize"
+        try:
+            cdp = await page.context.new_cdp_session(page)
+        except Exception as e:
+            _log(f"oidc hook not installed: {type(e).__name__}")
+            return
+
+        async def paused(ev):
+            req = ev["request"]
+            hs = [{"name": k, "value": v} for k, v in req["headers"].items()
+                  if k.lower() != "x-authyouragent-agent"]
+            u = urlparse(req["url"])
+            if f"{u.scheme}://{u.netloc}{u.path}" == prefix and req["method"] == "GET":
+                hs.append({"name": "X-AuthYourAgent-Agent", "value": agent.oidc_header(req["url"])})
+                self.used = True
+                _log(f"sign in with Auth Your Agent: proof added for {u.netloc}")
+            try:
+                await cdp.send("Fetch.continueRequest", {"requestId": ev["requestId"], "headers": hs})
+            except Exception:
+                pass
+
+        cdp.on("Fetch.requestPaused", lambda ev: asyncio.ensure_future(paused(ev)))
+        await cdp.send("Fetch.enable", {"patterns": [
+            {"urlPattern": prefix + "*", "resourceType": "Document", "requestStage": "Request"}]})
 
     def _on_nav(self, frame):
         if self.page and frame == self.page.main_frame:

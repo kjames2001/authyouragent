@@ -46,6 +46,7 @@ class AgentClient:
             password=None)
         self.pub = self.key.public_key()
         self.poll_interval = poll_interval
+        self.verify = verify
         self.client = httpx.Client(timeout=timeout, verify=verify)
         # per-site token cache: an access token is audience-bound (aud=site),
         # so a token minted for site A must never be sent to site B.
@@ -102,6 +103,54 @@ class AgentClient:
             {"iss": self.agent_id, "sub": self.agent_id,
              "iat": now, "exp": now + ttl, "type": "agent"},
             self.key, algorithm="ES256")
+
+    def oidc_header(self, authorize_url, ttl=60):
+        """X-AuthYourAgent-Agent value for one /oidc/authorize request: an
+        agent JWT bound to that exact URL (htu) with a one-time jti."""
+        import secrets
+        now = int(time.time())
+        return pyjwt.encode(
+            {"iss": self.agent_id, "sub": self.agent_id, "iat": now, "exp": now + ttl,
+             "type": "agent", "htu": authorize_url, "jti": secrets.token_urlsafe(16)},
+            self.key, algorithm="ES256")
+
+    def oidc_signin(self, authorize_url, timeout=330, client=None):
+        """Complete a "Sign in with Auth Your Agent" (OpenID Connect) sign-in
+        without a browser. `authorize_url` is the link the site's login
+        button points to. Waits for the owner's phone approval when one is
+        needed, and returns the site's redirect URL carrying ?code=...
+        (the caller then GETs it with its own HTTP session, so the site's
+        session cookie lands where the agent works). Raises PermissionError
+        when the owner denies, the approval times out, or access is revoked."""
+        from urllib.parse import urljoin, urlsplit, parse_qs
+        own = client is None
+        c = client or httpx.Client(timeout=30, verify=self.verify)
+        try:
+            r = c.get(authorize_url, headers={"X-AuthYourAgent-Agent": self.oidc_header(authorize_url)},
+                      follow_redirects=False)
+            if r.status_code != 302:
+                raise PermissionError(f"sign-in refused ({r.status_code}): {r.text[:200]}")
+            loc = urljoin(authorize_url, r.headers["location"])
+            cloud = urlsplit(authorize_url)
+            if urlsplit(loc).netloc == cloud.netloc and urlsplit(loc).path.startswith("/oidc/authorize/wait/"):
+                status_url = loc.split("?", 1)[0] + "/status?" + loc.split("?", 1)[1]
+                deadline = time.time() + timeout
+                while True:
+                    d = c.get(status_url).json()
+                    if d.get("redirect"):
+                        loc = d["redirect"]
+                        break
+                    if d.get("status") != "pending" or time.time() > deadline:
+                        raise PermissionError(f"sign-in not approved ({d.get('status', 'timeout')})")
+                    time.sleep(self.poll_interval)
+            q = parse_qs(urlsplit(loc).query)
+            if "error" in q:
+                raise PermissionError(f"sign-in refused: {q['error'][0]} "
+                                      f"{q.get('error_description', [''])[0]}".strip())
+            return loc
+        finally:
+            if own:
+                c.close()
 
     def _dpop_proof(self, method, url, access_token=None):
         ath = None
