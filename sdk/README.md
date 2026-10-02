@@ -104,6 +104,15 @@ python -m authyouragent keygen --name "Job-search assistant"
 
 Register the printed `jwk` in the app (Agents -> Add an agent). Keep `privkey_pem` on the agent's machine.
 
+Gate a script or CI step on your phone. The command exits 0 only if you approve:
+
+```
+export AYA_AGENT_ID=ag_xxxxx AYA_KEY_FILE=/path/to/agent-key.pem
+authyouragent approve npmjs.com publish && npm publish
+```
+
+Exit codes: 0 approved, 1 denied, 2 could not ask (key, revoked, network), 3 no answer in time. From Python: `agent.request_approval("npmjs.com", "publish")`.
+
 ```python
 from authyouragent import AgentClient
 

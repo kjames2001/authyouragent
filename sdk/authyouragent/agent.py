@@ -19,6 +19,7 @@ Key material: the agent holds its Ed25519/EC P-256 private key; the cloud
 never sees it. The DPoP key IS the agent key (single key, per RFC 9449).
 """
 
+import os
 import sys
 import json
 import threading
@@ -344,6 +345,38 @@ class AgentClient:
         except Exception as e:
             print(f"[authyouragent] status report failed: {e}")
 
+    def request_approval(self, site, action, wait=290, on_pending=None):
+        """Ask the owner's phone to approve one action, and wait for the answer.
+
+        For actions outside a website that has adopted Auth Your Agent: a
+        publish, a deploy, a payment the agent makes some other way. Returns
+        "approved", "denied", "expired" or "cancelled". Raises AgentError if
+        the request cannot be made (bad key, agent revoked, server down).
+        on_pending(txn_id) is called once the request is on the phone."""
+        try:
+            r = self.client.post(f"{self.base}/api/v1/agent-approval", json={
+                "agent_id": self.agent_id, "site": site, "action": action,
+                "agent_jwt": self._agent_jwt()}, timeout=15)
+        except httpx.HTTPError as e:
+            raise AgentError(f"approval request failed: {e}")
+        if r.status_code != 200:
+            raise AgentError(f"approval request returned {r.status_code}: {r.text[:200]}")
+        txn = _txn_id(r)
+        if on_pending:
+            on_pending(txn)
+        deadline = time.time() + max(1, min(int(wait), 290))
+        while time.time() < deadline:
+            time.sleep(self.poll_interval)
+            try:
+                p = self.client.get(f"{self.base}/api/v1/authz-requests/{txn}",
+                                    headers=self._poll_headers(), timeout=10)
+                st = p.json().get("status") if p.status_code == 200 else None
+            except Exception:
+                continue
+            if st in ("approved", "denied", "expired", "cancelled"):
+                return st
+        return "expired"
+
     def _stepup(self, site, action):
         try:
             r = self.client.post(f"{self.base}/api/v1/stepup", json={
@@ -458,13 +491,53 @@ def _cli_keygen(name):
         }
     }, indent=2))
 
+def _cli_approve(argv):
+    """`authyouragent approve <site> <action>`: ask the owner's phone, exit 0
+    only if approved, so a script can gate a step: `... && npm publish`."""
+    import argparse
+    ap = argparse.ArgumentParser(
+        prog="authyouragent approve",
+        description="Ask your phone to approve one action. Exits 0 only if you approve it, "
+                    "so it can gate a command: authyouragent approve npmjs.com publish && npm publish",
+        epilog="exit codes: 0 approved, 1 denied, 2 setup or request error, 3 expired or cancelled. "
+               "Agent from --agent-id/--key or AYA_AGENT_ID/AYA_KEY_FILE; server from AYA_CLOUD.")
+    ap.add_argument("site", help="where the action happens, e.g. npmjs.com or github.com/you/repo")
+    ap.add_argument("action", help="short label shown on your phone, e.g. publish or deploy")
+    ap.add_argument("--wait", type=int, default=290, help="seconds to wait for an answer (max 290)")
+    ap.add_argument("--agent-id", default=os.environ.get("AYA_AGENT_ID"))
+    ap.add_argument("--key", default=os.environ.get("AYA_KEY_FILE"), help="agent private key (PEM)")
+    ap.add_argument("--cloud", default=os.environ.get("AYA_CLOUD", "https://authyouragent.com"))
+    ap.add_argument("-q", "--quiet", action="store_true", help="print nothing; use the exit code")
+    a = ap.parse_args(argv)
+    say = (lambda *_: None) if a.quiet else (lambda m: print(m, file=sys.stderr, flush=True))
+    if not a.agent_id or not a.key:
+        say("authyouragent approve: need --agent-id and --key (or AYA_AGENT_ID / AYA_KEY_FILE)")
+        return 2
+    try:
+        pem = open(os.path.expanduser(a.key)).read()
+        agent = AgentClient(base_url=a.cloud, agent_id=a.agent_id, privkey_pem=pem,
+                            poll_interval=2, verify=not os.environ.get("AYA_INSECURE"))
+        st = agent.request_approval(a.site, a.action, wait=a.wait,
+                                    on_pending=lambda t: say(f"waiting for your phone to approve "
+                                                             f"'{a.action}' on {a.site} ..."))
+    except (OSError, ValueError, AgentError) as e:
+        say(f"authyouragent approve: {e}")
+        return 2
+    say(st)
+    return {"approved": 0, "denied": 1}.get(st, 3)
+
+
 def _cli_main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["vault"]:
         from .vault_cli import main as vault_main
         return vault_main(argv[1:])
+    if argv[:1] == ["approve"]:
+        sys.exit(_cli_approve(argv[1:]))
     import argparse
-    ap = argparse.ArgumentParser(prog="authyouragent", epilog="also: authyouragent vault up|down|status|env")
+    ap = argparse.ArgumentParser(prog="authyouragent",
+                                 epilog="also: authyouragent approve <site> <action>; "
+                                        "authyouragent vault up|down|status|env")
     ap.add_argument("cmd", choices=["keygen"])
     ap.add_argument("--name", default="agent")
     args = ap.parse_args(argv)

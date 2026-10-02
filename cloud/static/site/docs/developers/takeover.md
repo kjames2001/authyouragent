@@ -212,6 +212,8 @@ These appear in the owner's activity log and dashboard.
 
 The `request_approval` tool sends a push notification to the owner's phone with the site and action. The owner approves or denies. This does NOT require the site to have adopted Auth Your Agent -- it works for any site, using the `POST /api/v1/agent-approval` endpoint.
 
+Outside MCP, the same request is `agent.request_approval(site, action)` in the Python SDK, or `authyouragent approve <site> <action>` in a shell script or CI step, which exits 0 only when approved: `authyouragent approve npmjs.com publish && npm publish`. See [Approval for anything else](/docs/developers/agent-sdk#approval-for-anything-else).
+
 ## Agent revocation
 
 The owner can revoke an agent at any time from the Auth Your Agent app. The `check_agent_status` tool detects this and tells the agent to stop, and the vault ends the session by itself. Every server call (takeover, approval, status report) also validates the agent's JWT, so a revoked agent cannot make further requests.

@@ -94,6 +94,33 @@ If the person denies, or doesn't answer in time, you get the original `403` resp
 
 A step-up approval can be used once, within 60 seconds of being granted.
 
+## Approval for anything else
+
+Some actions don't happen on a website that uses Auth Your Agent: publishing a package, a deploy, a payment the agent makes some other way. Ask the person's phone directly:
+
+```python
+if agent.request_approval("npmjs.com", "publish") == "approved":
+    publish()
+```
+
+It returns `approved`, `denied`, `expired` or `cancelled`, and waits up to `wait` seconds (default and maximum 290). It needs no grant for the site.
+
+The same from a shell script or a CI step. The command exits 0 only if the person approves, so it can gate the next command:
+
+```bash
+export AYA_AGENT_ID=ag_xxxxx AYA_KEY_FILE=/path/to/agent-key.pem
+authyouragent approve npmjs.com publish && npm publish
+```
+
+| Exit code | Meaning |
+|---|---|
+| `0` | approved |
+| `1` | denied |
+| `2` | could not ask: missing or wrong key, agent revoked, server unreachable |
+| `3` | no answer within `--wait` seconds, or cancelled |
+
+It prints progress to stderr (`-q` for none), never to stdout. Like any approval you ask for yourself, it only covers what the script does next: it stops a step the person did not approve, but cannot stop a process that never asks.
+
 ## Errors
 
 Everything the SDK raises is an `AgentError`, with a message you can show or log:
