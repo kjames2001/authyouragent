@@ -123,6 +123,13 @@ r = agent.request("GET", "https://jobs.example.com/api/jobs")
 r = agent.request("POST", "https://jobs.example.com/api/jobs/j1/apply", stepup_action="apply")
 ```
 
+Sites with a **Sign in with Auth Your Agent** button (OpenID Connect): the vault handles it on its own when the agent clicks the button. Without the vault:
+
+```python
+back = agent.oidc_signin(authorize_url)   # the site's /oidc/authorize link; waits for the phone if needed
+http.get(back)                            # finish on the site's own callback
+```
+
 ## Site
 
 ```python
