@@ -38,6 +38,7 @@ To show owners that the site is really yours, publish the verification line from
 | `act.sub` | The **agent**. Also different on every site. Store `sub` and `act.sub` together: one owner may send several agents. |
 | `act.name`, `agent_name` | The agent's name, for example `Jarvis`. |
 | `name` | Display name, for example `Jarvis (agent of James)`. |
+| `preferred_username`, `nickname` | A username for apps that create accounts, for example `jarvis-3f9a1c`: the agent's name plus a code that is stable on your site and unique to this agent. |
 | `email` | The owner's email, only if you request the `email` scope and the owner approves sharing it. Not verified by Auth Your Agent. |
 | `phone_number` | The owner's phone, with the `phone` scope and approval. Verified. |
 | `amr` | `["agent", "passkey"]` when the owner approved this sign-in on their phone, `["agent", "grant"]` when an earlier approval covered it. `"password"` or `"google"` / `"microsoft"` if the owner approved another way. |
@@ -98,6 +99,54 @@ SOCIALACCOUNT_PROVIDERS = {"openid_connect": {"APPS": [{
 ```
 
 Callback address: `https://your-site/accounts/oidc/authyouragent/login/callback/`.
+
+### Self-hosted apps
+
+These apps already accept any OpenID Connect provider, so adding Auth Your Agent is configuration only. Each recipe below was tested end to end: an agent signed in, and the app created its account automatically. Register the app in *Your websites* first, with the callback address shown. Agents get a username like `jarvis-3f9a1c`, shown as "Jarvis (agent of James)" where the app has a display name.
+
+Recipes use `https://your-app`; replace it with your app's address.
+
+#### Nextcloud
+
+Install the **OpenID Connect user backend** app (`user_oidc`), then:
+
+```sh
+occ user_oidc:provider authyouragent \
+  --clientid=c_... --clientsecret=... \
+  --discoveryuri=https://authyouragent.com/.well-known/openid-configuration \
+  --scope="openid profile" --unique-uid=0 \
+  --mapping-uid=preferred_username --mapping-display-name=name
+```
+
+Callback address: `https://your-app/apps/user_oidc/code`. The button appears on the login page. Nextcloud must be served over HTTPS, which `user_oidc` requires.
+
+#### Forgejo and Gitea
+
+```sh
+forgejo admin auth add-oauth --name authyouragent --provider openidConnect \
+  --key c_... --secret ... \
+  --auto-discover-url https://authyouragent.com/.well-known/openid-configuration \
+  --scopes openid --scopes profile --scopes email
+```
+
+In `app.ini`, under `[oauth2_client]`: `ENABLE_AUTO_REGISTRATION = true` and `ACCOUNT_LINKING = disabled` (Gitea: also `USERNAME = preferred_username`). Restart Forgejo afterwards, because it reads these settings only at start. Callback address: `https://your-app/user/oauth2/authyouragent/callback`.
+
+Forgejo creates accounts automatically only when it receives an email, hence the `email` scope. The owner approves sharing it on their phone. Without it, Forgejo asks the agent to fill in a sign-up form.
+
+#### Paperless-ngx
+
+```sh
+PAPERLESS_APPS=allauth.socialaccount.providers.openid_connect
+PAPERLESS_SOCIAL_AUTO_SIGNUP=true
+PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS=true
+PAPERLESS_SOCIALACCOUNT_PROVIDERS={"openid_connect":{"APPS":[{"provider_id":"authyouragent","name":"Auth Your Agent","client_id":"c_...","secret":"...","settings":{"server_url":"https://authyouragent.com"}}],"OAUTH_PKCE_ENABLED":true}}
+```
+
+Callback address: `https://your-app/accounts/oidc/authyouragent/login/callback/`. A new account has no permissions until an admin grants them, which is a sensible default for an agent.
+
+#### Immich
+
+Administration, Settings, Authentication Settings, OAuth: enable it, set Issuer URL `https://authyouragent.com/.well-known/openid-configuration`, the client ID and secret, scope `openid email profile`, button text "Sign in with Auth Your Agent", and turn on Auto Register. Callback addresses: `https://your-app/auth/login`, `https://your-app/user-settings` and `https://your-app/api/oauth/mobile-redirect`. Immich needs the email, so the owner approves sharing it on their phone.
 
 ### For agent developers
 
