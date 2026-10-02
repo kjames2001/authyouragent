@@ -54,12 +54,23 @@ SCALE = float(os.environ.get("VAULT_SCALE", "1"))
 TOKEN = os.environ["VAULT_TOKEN"]
 WAIT_MAX = 290
 
+# Text blocks in page order, each once. Headings and paragraphs are content
+# and are kept whatever their length; a list item or table cell is kept whole
+# unless it holds paragraphs of its own (those are read instead). Links,
+# buttons, labels and spans can wrap whole sections, so they are only taken
+# when short, which keeps a wrapper from repeating everything inside it.
 READ_JS = r"""(max) => {
   const out = [], seen = new Set();
+  let size = 0;
   for (const el of document.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,button,label,a,td,th,span')) {
     const t = (el.innerText || '').trim();
-    if (t && t.length < 500 && !seen.has(t)) { seen.add(t); out.push(t); }
-    if (out.join('\n').length > max) break;
+    if (!t || seen.has(t)) continue;
+    const tag = el.tagName;
+    const block = /^(H[1-6]|P)$/.test(tag)
+      || (/^(LI|TD|TH)$/.test(tag) && !el.querySelector('p'));
+    if (!block && t.length >= 500) continue;
+    seen.add(t); out.push(t); size += t.length + 1;
+    if (size > max) break;
   }
   return out.join('\n');
 }"""
@@ -73,22 +84,41 @@ SIGNOUT = {
     "github.com": ("https://github.com/logout",
                    'form[action="/logout"] [type=submit]', "https://github.com/settings/profile"),
     "glama.ai": ("https://glama.ai/sign-out", None, "https://glama.ai/settings/preferences"),
+    # New Reddit keeps "Log Out" in a lazily built user menu; old Reddit's
+    # header has a logout form (POST with the account's modhash).
+    "reddit.com": ("https://old.reddit.com/", "form.logout a, form.logout [type=submit]",
+                   "https://old.reddit.com/prefs/"),
 }
 # Where the owner can see and end sessions if a sign-out could not be done.
 DEVICE_PAGES = {
     "google.com": "https://myaccount.google.com/device-activity",
     "github.com": "https://github.com/settings/sessions",
+    "reddit.com": "https://www.reddit.com/settings/account",
 }
 # Finds a sign-out control on the page, visible or tucked in a closed menu.
 # Returns {href} for a link or {click: true} after clicking a button.
+# The words are matched in the site's own language too (a signed-in account
+# keeps its language setting), and open shadow roots are searched as well.
 LOGOUT_JS = r"""() => {
-  const re = /^(sign|log)\s?(out|off)$/i;
+  const re = new RegExp('^(?:(?:sign|log)\\s?(?:out|off)|登出|退出|退出登录|退出帳號|退出账号|注销|登出帳戶|' +
+    'ログアウト|로그아웃|abmelden|ausloggen|se déconnecter|déconnexion|cerrar sesión|' +
+    'sair|terminar sessão|esci|disconnetti|uitloggen|wyloguj|выйти|выход|çıkış yap)$', 'iu');
   const words = el => (el.innerText || el.value || el.getAttribute('aria-label') || el.title || '').replace(/\s+/g, ' ').trim();
-  for (const a of document.querySelectorAll('a[href]')) {
+  const all = (sel) => {
+    const found = [], roots = [document];
+    while (roots.length) {
+      const r = roots.shift();
+      found.push(...r.querySelectorAll(sel));
+      for (const el of r.querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+    }
+    return found;
+  };
+  for (const a of all('a[href]')) {
     const h = a.getAttribute('href') || '';
+    if (/^javascript:/i.test(h)) continue;
     if (re.test(words(a)) || /(^|\/)(log.?out|sign.?out|signoff|logoff)(\b|$)/i.test(h)) return {href: a.href};
   }
-  for (const b of document.querySelectorAll('button,[role=button],[role=menuitem],input[type=submit]')) {
+  for (const b of all('button,[role=button],[role=menuitem],input[type=submit],a[href^="javascript:" i]')) {
     if (re.test(words(b))) { b.click(); return {click: true}; }
   }
   return null;

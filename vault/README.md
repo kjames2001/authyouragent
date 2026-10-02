@@ -68,11 +68,13 @@ authyouragent vault env      # print the env block again
   cookies) in `~/.authyouragent/vault/state`; on the next start it tells you,
   on your dashboard, which sites were left signed in and where to end those
   sessions.
-- **Sign-out on unknown sites.** Known routes (Google, GitHub, Glama) are
-  checked. Elsewhere the vault tries, in order: a route that worked before, the
-  site's published OpenID Connect sign-out endpoint, then a "Sign out" link or
-  button on its pages, and confirms by the session cookie being cleared. When
-  none works it reports "wiped locally, not signed out".
+- **Sign-out on unknown sites.** Known routes (Google, GitHub, Glama, Reddit)
+  are checked. Elsewhere the vault tries, in order: a route that worked before,
+  the site's published OpenID Connect sign-out endpoint, then a "Sign out" link
+  or button on its pages (matched in the account's language as well as
+  English, including controls inside shadow roots), and confirms by the session
+  cookie being cleared. When none works it reports "wiped locally, not signed
+  out".
 - **Step-up approval reads the page and watches the click.** Every form
   submit asks. A button whose words say nothing (an icon, "OK") is watched
   after the click: a request that writes to the site (POST, PUT, PATCH,
