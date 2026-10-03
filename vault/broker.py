@@ -330,11 +330,56 @@ async def _open_pages():
             return [t["url"] for t in await r.json() if t.get("type") == "page"]
 
 
-async def _site_session(ctx, site):
-    """The site's HttpOnly cookies (name -> value). Signing in sets or changes
-    one of these; just visiting pages normally does not."""
-    return {c["name"]: c["value"] for c in await ctx.cookies()
-            if c.get("httpOnly") and _site(c["domain"].lstrip(".")) == site}
+# HttpOnly cookies that are not a sign-in: anti-forgery tokens, OAuth state,
+# redirect targets. Sites keep them after signing out (Auth.js keeps its
+# csrf-token), so they must not count against a confirmed sign-out.
+NOT_SESSION = re.compile(r"csrf|xsrf|callback|redirect|state|nonce|pkce|consent|locale|lang|theme|tz", re.I)
+
+
+def _cookie_for(c, host):
+    """Would the browser send cookie `c` to `host`? A host-only cookie (no
+    leading dot) goes to that exact host; a domain cookie to its subdomains too."""
+    raw = c["domain"].lower()
+    d = raw.lstrip(".")
+    return host == d or (raw.startswith(".") and host.endswith("." + d))
+
+
+async def _site_session(ctx, host):
+    """The HttpOnly cookies the browser sends to `host` that can hold a
+    sign-in (name -> value). Signing in sets or changes one of these; just
+    visiting pages normally does not."""
+    return {c["name"] + "@" + c["domain"]: c["value"] for c in await ctx.cookies()
+            if c.get("httpOnly") and _cookie_for(c, host) and not NOT_SESSION.search(c["name"])}
+
+
+async def _quiet(page, wait=5000):
+    """Let the page's own scripts finish first. Sign-out forms often get their
+    anti-forgery token by script after load (Auth.js fetches /auth/csrf);
+    pressing Sign out before that sends an empty token and the site refuses."""
+    try:
+        await page.wait_for_load_state("networkidle", timeout=wait)
+    except Exception:
+        pass
+    # and until no form's hidden fields are still empty (bounded: some stay empty)
+    try:
+        await page.wait_for_function(
+            "() => ![...document.querySelectorAll('form input[type=hidden]')].some(i => !i.value)",
+            timeout=wait)
+    except Exception:
+        pass
+
+
+async def _settle_after(page, act, wait=10000):
+    """Run `act` (a click or a form submit) and let any navigation it starts
+    finish. Moving on at once would let the next goto cancel the sign-out
+    request in flight."""
+    try:
+        async with page.expect_navigation(wait_until="domcontentloaded", timeout=wait):
+            await act()
+    except Exception as e:
+        if "Timeout" not in type(e).__name__ and "imeout" not in str(e):
+            raise
+    await asyncio.sleep(0.5)
 
 
 async def _oidc_end_session(origin):
@@ -702,28 +747,49 @@ class Vault:
     # ── ending a session ──
     async def sign_out(self):
         """Try a real sign-out on every site used in this session. Returns a
-        per-site report; never claims success it has not checked."""
+        per-site report; never claims success it has not checked.
+
+        Known providers (SIGNOUT) are handled once per site. Every other site is
+        handled per host the agent visited (demo.example.com, not example.com),
+        so the sign-out runs on the host that holds the session."""
         report = {}
         page = await self.attach()
-        cookie_sites = {_site(c["domain"].lstrip(".")) for c in await page.context.cookies()}
+        cookies = await page.context.cookies()
+        cookie_sites = {_site(c["domain"].lstrip(".")) for c in cookies}
         # The agent is detached while the owner is in control, so sites the owner
         # visited are not in self.hosts. Always include the known sign-in
         # providers whenever the browser holds their cookies.
-        sites = ({_site(h) for h in self.hosts} | set(SIGNOUT)) & cookie_sites
-        for site in sorted(sites):
+        known = ({_site(h) for h in self.hosts} | set(SIGNOUT)) & cookie_sites & set(SIGNOUT)
+        for site in sorted(known):
             try:
                 report[site] = await self._sign_out_site(page, site)
             except Exception as e:
                 report[site] = f"error: {type(e).__name__}"
+        # Other hosts that hold a sign-in, most specific first. Hosts sharing one
+        # cookie (www.x.com and x.com) are signed out once.
+        hosts = sorted((h for h in self.hosts if _site(h) not in SIGNOUT),
+                       key=lambda h: (-h.count("."), h))
+        start = {h: await _site_session(page.context, h) for h in hosts}
+        done = set()
+        for h in hosts:
+            if not start[h]:
+                continue
+            if set(start[h]) <= done:
+                continue                      # its cookies were handled with another host
+            try:
+                report[h] = await self._sign_out_generic(page, h)
+            except Exception as e:
+                report[h] = f"error: {type(e).__name__}"
+            done |= set(start[h])
         return report
 
     async def _sign_out_site(self, page, site):
         if site in SIGNOUT:
             url, confirm, probe = SIGNOUT[site]
             await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            await _quiet(page)
             if confirm and await page.locator(confirm).count():
-                await page.locator(confirm).first.click()
-                await page.wait_for_load_state("domcontentloaded")
+                await _settle_after(page, lambda: page.locator(confirm).first.click())
             # A signed-out visit to the probe page is sent to a sign-in page or
             # away from the probe's host (myaccount.google.com -> google.com/account/about).
             await page.goto(probe, wait_until="domcontentloaded", timeout=20000)
@@ -735,13 +801,14 @@ class Vault:
             return "sign-out attempted, still signed in"
         return await self._sign_out_generic(page, site)
 
-    async def _sign_out_generic(self, page, site):
-        """Sites without a known route. In order: a route that worked before,
-        the site's published OpenID sign-out endpoint, then a sign-out control
-        on its own pages. Checked by whether the site cleared its session
-        cookies (a server that ends the session clears them)."""
-        before = await _site_session(page.context, site)
-        origin = next((o for o in self.origins if _site(urlparse(o).hostname) == site), f"https://{site}")
+    async def _sign_out_generic(self, page, host):
+        """Sites without a known route, per host. In order: a route that worked
+        before, the site's published OpenID sign-out endpoint, then a sign-out
+        control on its own pages. Checked by whether the site cleared its
+        session cookies (a server that ends the session clears them)."""
+        site = host
+        before = await _site_session(page.context, host)
+        origin = next((o for o in sorted(self.origins) if urlparse(o).hostname == host), f"https://{host}")
         learned = _load(LEARNED_FILE, {})
         tried = []
 
@@ -753,12 +820,12 @@ class Vault:
         async def confirm_if_asked():
             btn = page.get_by_role("button", name=re.compile(r"^(sign|log)\s?(out|off)|^yes|^confirm|^continue", re.I))
             if await btn.count():
-                await btn.first.click()
-                await page.wait_for_load_state("domcontentloaded")
+                await _settle_after(page, lambda: btn.first.click())
 
         async def via(url, how):
             tried.append(how)
             await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            await _quiet(page)
             await confirm_if_asked()
             if await settled():
                 learned[site] = url
@@ -773,12 +840,18 @@ class Vault:
             return "signed out (checked: session cookie cleared)"
         tried.append("page control")
         await page.goto(origin + "/", wait_until="domcontentloaded", timeout=20000)
-        found = await page.evaluate(LOGOUT_JS)
+        await _quiet(page)
+        found = None
+
+        async def look():
+            nonlocal found
+            found = await page.evaluate(LOGOUT_JS)
+        # LOGOUT_JS clicks a sign-out button itself: wait for the request it sends
+        await _settle_after(page, look)
         if found and found.get("href"):
             if await via(found["href"], "sign-out link"):
                 return "signed out (checked: session cookie cleared)"
         elif found:
-            await page.wait_for_load_state("domcontentloaded")
             await confirm_if_asked()
             if await settled():
                 return "signed out (checked: session cookie cleared)"
