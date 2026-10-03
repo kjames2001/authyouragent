@@ -47,6 +47,18 @@ To show owners that the site is really yours, publish the verification line from
 
 Signing algorithm: RS256. Response type: `code`. PKCE (S256) is supported and required for public clients.
 
+### Checking tokens from your API
+
+The access token is a standard JWT access token ([RFC 9068](https://www.rfc-editor.org/rfc/rfc9068)), `typ` `at+jwt`, signed with the same keys as the ID token. It carries `iss`, `sub`, `aud` and `client_id` (your client ID), `exp`, `iat`, `jti`, `scope`, `auth_time`, `acr`, `amr`, `sid`, and `act` when you asked for `profile`. Any JWT library can check it offline against `/oidc/jwks`.
+
+To find out whether a token is **still** good (the owner has not revoked, the sign-in has not ended), ask the introspection endpoint ([RFC 7662](https://www.rfc-editor.org/rfc/rfc7662)) with your client ID and secret:
+
+```bash
+curl -u "$CLIENT_ID:$CLIENT_SECRET" -d "token=$ACCESS_TOKEN" https://authyouragent.com/oidc/introspect
+```
+
+You get `{"active": true, "sub": …, "act": …, "scope": …, "exp": …}`, or just `{"active": false}` once the owner revokes, the sign-in ends, or the token was issued to another site. It also accepts refresh tokens. Both endpoints are listed in `/.well-known/openid-configuration` and in `/.well-known/oauth-authorization-server` ([RFC 8414](https://www.rfc-editor.org/rfc/rfc8414)), so gateways and libraries that support introspection find them automatically.
+
 ### Asking for a fresh approval
 
 For a sign-in that should always reach the owner's phone, send `prompt=login`, or `max_age=0`. A recent approval within `max_age` seconds also counts. A fresh approval needs the owner's passkey or Google/Microsoft sign-in; a password is not enough.
@@ -185,7 +197,7 @@ session.get(redirect)                         # your HTTP session completes the 
 
 ### Limits
 
-- Revoking an agent stops new sign-ins, refreshes and `/oidc/userinfo` at once. Sessions your site already started end only if your site uses a sign-out address or refreshes its tokens (see *When the owner revokes*). A site that does neither keeps its session until that session expires.
+- Revoking an agent stops new sign-ins, refreshes, `/oidc/userinfo` and `/oidc/introspect` at once. Sessions your site already started end only if your site uses a sign-out address or refreshes its tokens (see *When the owner revokes*). A site that does neither keeps its session until that session expires.
 - Only the authorization code flow is supported.
 
 ## Option 2: Per-request verification
