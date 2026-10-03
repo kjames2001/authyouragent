@@ -59,6 +59,17 @@ curl -u "$CLIENT_ID:$CLIENT_SECRET" -d "token=$ACCESS_TOKEN" https://authyourage
 
 You get `{"active": true, "sub": …, "act": …, "scope": …, "exp": …}`, or just `{"active": false}` once the owner revokes, the sign-in ends, or the token was issued to another site. It also accepts refresh tokens. Both endpoints are listed in `/.well-known/openid-configuration` and in `/.well-known/oauth-authorization-server` ([RFC 8414](https://www.rfc-editor.org/rfc/rfc8414)), so gateways and libraries that support introspection find them automatically.
 
+### Binding tokens to your key (DPoP)
+
+Optional, and recommended if your site stores tokens. Send a DPoP proof ([RFC 9449](https://www.rfc-editor.org/rfc/rfc9449)) with the token request: a short JWT signed by a key your site holds, with that key's public part in its header. The access token then carries `cnf.jkt` (your key's thumbprint) and `token_type` is `DPoP`. A token copied from your database or logs is useless without your private key:
+
+- `/oidc/userinfo` needs `Authorization: DPoP <token>` plus a fresh proof that includes `ath`; a bound token sent as `Bearer` is refused.
+- The refresh token stays bound to the same key: refreshing needs a proof signed by it.
+- Introspection reports the binding (`cnf.jkt`, `token_type` `DPoP`).
+- To bind the authorization code as well, add `dpop_jkt=<your key's thumbprint>` to the sign-in link.
+
+Proofs are single use and valid for 2 minutes; ES256, RS256 and EdDSA keys are accepted. Libraries such as `oauth4webapi` (JavaScript) and Spring Security send them for you. Sites that do not send a proof keep getting ordinary `Bearer` tokens.
+
 ### Asking for a fresh approval
 
 For a sign-in that should always reach the owner's phone, send `prompt=login`, or `max_age=0`. A recent approval within `max_age` seconds also counts. A fresh approval needs the owner's passkey or Google/Microsoft sign-in; a password is not enough.
