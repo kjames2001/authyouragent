@@ -65,6 +65,24 @@ For a sign-in that should always reach the owner's phone, send `prompt=login`, o
 
 `prompt=none` never shows a card: it answers `login_required` or `consent_required` when an approval would be needed.
 
+### Asking the owner to confirm something (CIBA)
+
+Your site can ask the owner directly, with no browser involved: for example *"Pay R450 for order 1182"* before you charge an order the agent placed. This is [OpenID Connect Client-Initiated Backchannel Authentication (CIBA) 1.0](https://openid.net/specs/openid-client-initiated-backchannel-authentication-core-1_0.html) in poll mode, which most OIDC libraries support.
+
+1. Post to the backchannel endpoint with your client ID and secret. Name the agent with `login_hint` = the `act.sub` you received at sign-in (or `id_token_hint` = an ID token we issued to you), and say what the owner is confirming in `binding_message` (one line, at most 120 characters):
+
+   ```bash
+   curl -u "$CLIENT_ID:$CLIENT_SECRET" https://authyouragent.com/oidc/bc-authorize \
+     -d scope="openid profile" -d login_hint="$ACT_SUB" \
+     --data-urlencode binding_message="Pay R450 for order 1182"
+   ```
+
+   You get `{"auth_req_id": …, "expires_in": 900, "interval": 5}`.
+2. The owner's phone shows your message, marked as coming from your site, not from the agent. A confirmation always needs the owner's passkey or Google/Microsoft sign-in; a password is not enough.
+3. Poll the token endpoint every `interval` seconds with `grant_type=urn:openid:params:grant-type:ciba` and the `auth_req_id`. You get `authorization_pending` (or `slow_down` if you poll too fast) until the owner answers, then fresh tokens whose `auth_time` is the moment of the tap, or `access_denied` / `expired_token`. Each `auth_req_id` gives tokens once.
+
+You can only ask about agents the owner has already allowed on your site; anyone else gets `unknown_user_id`, and a revoked agent gets `access_denied`.
+
 ### When the owner revokes
 
 Revoking in the app stops new sign-ins at once. To end a session your site **already** started, use either or both of these standard mechanisms:
@@ -198,7 +216,7 @@ session.get(redirect)                         # your HTTP session completes the 
 ### Limits
 
 - Revoking an agent stops new sign-ins, refreshes, `/oidc/userinfo` and `/oidc/introspect` at once. Sessions your site already started end only if your site uses a sign-out address or refreshes its tokens (see *When the owner revokes*). A site that does neither keeps its session until that session expires.
-- Only the authorization code flow is supported.
+- Sign-in uses the authorization code flow; confirmations use CIBA in poll mode (no ping or push delivery).
 
 ## Option 2: Per-request verification
 
