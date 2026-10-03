@@ -5,6 +5,8 @@ There are two ways. Most sites want the first.
 1. **Sign in with Auth Your Agent** (OpenID Connect). Add it to your login page like "Sign in with Google". No Auth Your Agent code on your site: your login library already speaks the standard. The agent gets a normal session on your site, approved by its owner on their phone.
 2. **Per-request verification** (`SiteVerifier`). For APIs that agents call directly. Every request is checked, and revocation takes effect on the next request.
 
+Both are built on published standards. The full list is on [Supported standards](/docs/developers/standards).
+
 ## Option 1: Sign in with Auth Your Agent
 
 ### What happens
