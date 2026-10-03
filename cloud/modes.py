@@ -183,6 +183,9 @@ def clean_details(d):
         v = d.get(k)
         if isinstance(v, str) and v.strip():
             out[k] = re.sub(r"\s+", " ", v).strip()[:n]
+    # the vault falls back to the button's words for the item: not worth a line
+    if out.get("item") and out.get("label") and words(out["item"]).lower() == words(out["label"]).lower():
+        del out["item"]
     for k in ("card_fields", "password_fields"):
         if d.get(k) is True:
             out[k] = True
