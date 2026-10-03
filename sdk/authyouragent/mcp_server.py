@@ -167,6 +167,8 @@ async def _call(method, path, **kw):
     data = r.json()
     if r.status_code == 409:
         raise RuntimeError(data.get("detail", "busy"))
+    if r.status_code == 504 and data.get("error") == "result_unknown":
+        raise RuntimeError("result unknown: " + data.get("detail", ""))
     if r.status_code >= 400:
         raise RuntimeError(f"vault error {r.status_code}: {data.get('detail') or data.get('error')}")
     return data

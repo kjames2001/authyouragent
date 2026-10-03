@@ -962,6 +962,8 @@ async def auth(request, handler):
         return web.json_response({"error": "busy", "detail": str(e)}, status=409)
     except NotApproved as e:
         return web.json_response({"error": "not_approved", "detail": str(e)}, status=403)
+    except ResultUnknown as e:
+        return web.json_response({"error": "result_unknown", "detail": str(e)}, status=504)
     except BadRequest as e:
         return web.json_response({"error": "bad_request", "detail": str(e)}, status=400)
     except Exception as e:
@@ -1189,6 +1191,73 @@ class NotApproved(Exception):
     pass
 
 
+class ResultUnknown(Exception):
+    """A money click was made but the site did not answer: it may or may not
+    have gone through. The agent must look before it tries again."""
+
+
+# Money clicks: their outcome, per site, so a retry after a timeout is not
+# blind. The vault cannot know whether a shop charged; the shop can. What the
+# vault can do is refuse to repeat a money click whose result it never saw
+# until the agent has read the page, and tell the owner a card is a repeat.
+MONEY_WORDS = re.compile(
+    r"\b(pay|payment|purchase|buy|order|checkout|check out|subscribe|donate|transfer|"
+    r"withdraw|tip|book|reserve|rent|bid|top ?up|renew|place order|confirm order)\b", re.I)
+REPEAT_WINDOW = 600     # s: a second money click on a site within this asks as a repeat
+ANSWER_WAIT = 15        # s: how long a money click's requests may take to answer
+MONEY_LOG = {}          # site -> {"label", "amount", "t", "unknown", "read"}
+
+
+def _is_money(label, details):
+    return bool(details.get("amount") or details.get("card_fields") or MONEY_WORDS.search(label or ""))
+
+
+def _repeat_of(site, now=None):
+    m = MONEY_LOG.get(site)
+    now = now or time.time()
+    return m if m and now - m["t"] < REPEAT_WINDOW else None
+
+
+async def _answered(page, act, wait=None):
+    """Run a money click; True if every same-site request it sent was
+    answered (a 2xx-4xx response), False if the result is unknown (no answer
+    in time, a failed request, a 5xx, or the click itself errored after
+    sending)."""
+    wait = ANSWER_WAIT if wait is None else wait
+    site = _site(urlparse(page.url).hostname)
+    sent = []
+    def on_request(r):
+        try:
+            host = urlparse(r.url).hostname
+        except Exception:
+            return
+        # the click's own requests; a redirect's follow-up is the same answer
+        if _site(host) == site and r.redirected_from is None \
+                and (r.method != "GET" or r.is_navigation_request()) and not TELEMETRY.search(r.url):
+            sent.append(r)
+    page.on("request", on_request)
+    err = None
+    try:
+        try:
+            await act()
+        except Exception as e:
+            err = e
+        await asyncio.sleep(0.3)         # a click's request fires right after it
+    finally:
+        page.remove_listener("request", on_request)
+    if err and not sent:
+        raise err                        # nothing was sent: a plain failure to click
+    deadline = time.time() + wait
+    for r in sent:
+        try:
+            resp = await asyncio.wait_for(r.response(), max(0.1, deadline - time.time()))
+        except (asyncio.TimeoutError, Exception):
+            return False
+        if resp is None or resp.status >= 500:
+            return False
+    return True
+
+
 # A click the page and button do not show as committing can still send data
 # from a script. While such a click runs, requests that write to the site are
 # held until the owner decides. Not held: reads, beacons, analytics endpoints,
@@ -1314,6 +1383,21 @@ async def _guarded(page, selector, label_of, act, submits_form):
     if not sign_in and _needs_approval(label, form_rule):
         label = label or "submit form"
         details = await _details(page, selector, label)
+        site = _site(urlparse(page.url).hostname)
+        money = _is_money(label, details)
+        prev = _repeat_of(site) if money else None
+        if prev and prev["unknown"] and not prev["read"]:
+            raise NotApproved(
+                f"not clicked: '{prev['label']}'{' ' + prev['amount'] if prev['amount'] else ''} on {site} "
+                f"{int((time.time() - prev['t']) / 60)} min ago may have gone through (the site did not answer). "
+                "Read the page or the site's orders first, then try again only if it did not.")
+        if prev:
+            mins = int((time.time() - prev["t"]) / 60)
+            details["repeat"] = (f"Repeat: you approved '{prev['label']}'"
+                                 + (f" ({prev['amount']})" if prev["amount"] else "")
+                                 + f" here {'just now' if mins < 1 else f'{mins} min ago'}"
+                                 + (", and the site never answered: it may already have gone through"
+                                    if prev["unknown"] else ""))
         result = await _approve(page, label, details=details)
         if result != "approved":
             raise NotApproved(f"the owner did not approve '{label}' ({result})")
@@ -1323,7 +1407,19 @@ async def _guarded(page, selector, label_of, act, submits_form):
         if details.get("amount") and now.get("amount") != details.get("amount"):
             raise NotApproved(f"the amount changed after approval ({details['amount']} -> "
                               f"{now.get('amount') or 'none'}); not clicked. Ask again.")
-        return await act()
+        if not money:
+            return await act()
+        ok = await _answered(page, act)
+        MONEY_LOG[site] = {"label": label, "amount": details.get("amount", ""), "t": time.time(),
+                           "unknown": not ok, "read": False}
+        if not ok:
+            _log("money click result unknown:", site, label)
+            raise ResultUnknown(
+                f"'{label}'{' ' + details['amount'] if details.get('amount') else ''} was clicked, but {site} "
+                f"did not answer within {ANSWER_WAIT} s: it may or may not have gone through. Do NOT click it "
+                "again yet: read the page (or the site's orders) to see what happened. The vault refuses a "
+                "repeat until you have.")
+        return
     if sign_in or info["searchForm"] or _is_auth_step(page.url):
         return await act()
     # Not shown as committing: watch what the click actually sends.
@@ -1362,6 +1458,9 @@ async def read(request):
     m = max(0, min(int(request.query.get("max_elements", 80)), 300))
     page = await V.attach()
     text = await page.evaluate(READ_JS, n)
+    m_ = MONEY_LOG.get(_site(urlparse(page.url).hostname))
+    if m_:
+        m_["read"] = True                # the agent has looked since the unanswered money click
     out = {**await _where(page), "text": text[:n]}
     if m:
         out.update(await page.evaluate(ELEMENTS_JS, m))

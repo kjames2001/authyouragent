@@ -89,6 +89,16 @@ Smart also pauses for an hour after the owner denies something. The owner choose
 
 For the agent nothing changes: the click returns when it is approved, by the owner or by their mode, and fails with `the owner did not approve` otherwise.
 
+## When a payment's result is unknown
+
+A money click (buy, pay, order, or any form with an amount or card fields) is watched until the site answers. If the site does not answer within 15 seconds, answers with a server error, or the connection fails, the click returns `result_unknown`: the request reached the site, and it may or may not have gone through.
+
+- **Do not click again.** The vault refuses another money click on that site until the agent has read a page there (`read_page`), for example the site's orders.
+- **After reading, a retry asks the owner again**, and the card says so: "Repeat: you approved 'Buy' ($45.00) here 2 min ago, and the site never answered: it may already have gone through."
+- A second money click on the same site within 10 minutes always carries the repeat line, even when the first one was answered.
+
+The vault cannot know whether a shop charged; the shop can. Shops should make Buy safe to repeat: a one-time key in the checkout form, and an open or paid order for the same item returned instead of a new one. The [Demo Shop](https://demo.authyouragent.com/?slow=1) does both, and has a slow payment switch that shows this path.
+
 ## Trusted sites
 
 The vault's rules suit most sites. For a site the owner uses all the time, or a service on their own network, they can relax them:

@@ -215,7 +215,7 @@ def clean_details(d):
     if not isinstance(d, dict):
         return {}
     out = {}
-    for k, n in (("label", 80), ("amount", 40), ("item", 120), ("order", 60), ("page", 200)):
+    for k, n in (("label", 80), ("amount", 40), ("item", 120), ("order", 60), ("page", 200), ("repeat", 240)):
         v = d.get(k)
         if isinstance(v, str) and v.strip():
             out[k] = re.sub(r"\s+", " ", v).strip()[:n]

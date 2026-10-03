@@ -150,6 +150,7 @@ Typical usage:
 - **A cancellation or a denial is an answer.** Stop and tell your user. Do not retry unless they ask you to.
 - **Always call `end_session`** when you are done. It signs your user out of the sites you used; if the vault could not sign out of a site, tell your user which one.
 - **Revoked means stop.**
+- **`result unknown` after a payment click means it may have gone through.** Do not click again: read the page or the site's orders first. The vault refuses a repeat until you have, and a retry asks your user again with a warning.
 - **Some clicks need your user's approval.** Buying, posting, deleting and the like wait for them on their phone; your user may let low-risk clicks (save, filter, add to cart) through automatically, per site. That is their setting, not yours: you cannot change it, and a refused click (`the owner did not approve`, or `the amount changed after approval`) is an answer. If the amount changed, read the page again and tell your user before you try again. See [Approval modes](/docs/developers/takeover#approval-modes).
 
 ## Where to read more
