@@ -2,6 +2,7 @@
 // "Sign in with Auth Your Agent" is only configuration: issuer, client id, secret.
 import express from "express"
 import { ExpressAuth, getSession } from "@auth/express"
+import { randomBytes } from "node:crypto"
 import { createRemoteJWKSet, jwtVerify } from "jose"
 
 const ISSUER = process.env.AYA_ISSUER || "https://authyouragent.com"
@@ -10,10 +11,10 @@ const ISSUER = process.env.AYA_ISSUER || "https://authyouragent.com"
 // below catches anything a restart forgets within one access-token lifetime.
 const endedSids = new Map()   // sid -> time ended
 const JWKS = createRemoteJWKSet(new URL(ISSUER + "/oidc/jwks"))
-let tokenEndpoint
+let meta
 async function discover() {
-  tokenEndpoint ??= (await (await fetch(ISSUER + "/.well-known/openid-configuration")).json()).token_endpoint
-  return tokenEndpoint
+  meta ??= await (await fetch(ISSUER + "/.well-known/openid-configuration")).json()
+  return meta.token_endpoint
 }
 
 const AYA = {
@@ -47,12 +48,7 @@ const authConfig = {
       }
       if (token.sid && endedSids.has(token.sid)) return null          // owner revoked: signed out
       if (Date.now() < (token.expires_at - 30) * 1000) return token
-      const r = await fetch(await discover(), {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded",
-                   Authorization: "Basic " + Buffer.from(`${encodeURIComponent(AYA.clientId)}:${encodeURIComponent(AYA.clientSecret)}`).toString("base64") },
-        body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: token.refresh_token }),
-      })
+      const r = await post(await discover(), { grant_type: "refresh_token", refresh_token: token.refresh_token })
       if (!r.ok) return null                                           // revoked or expired: signed out
       const t = await r.json()
       token.access_token = t.access_token
@@ -66,6 +62,42 @@ const authConfig = {
       return session
     },
   },
+}
+
+// a form POST to the provider, authenticated with the site's client secret
+const post = (url, body) => fetch(url, {
+  method: "POST",
+  headers: { "Content-Type": "application/x-www-form-urlencoded",
+             Authorization: "Basic " + Buffer.from(`${encodeURIComponent(AYA.clientId)}:${encodeURIComponent(AYA.clientSecret)}`).toString("base64") },
+  body: new URLSearchParams(body),
+})
+
+// ---- Checkout: before charging, the shop asks the agent's OWNER directly
+// (OpenID Connect CIBA, poll mode). The agent cannot approve its own purchase;
+// the owner's phone shows the shop's own message.
+const PRODUCT = { name: "Brass lighthouse lamp", price: "$45.00" }
+const orders = new Map()   // id -> order (a real shop: its database)
+async function askOwner(o) {
+  await discover()
+  const r = await post(meta.backchannel_authentication_endpoint, {
+    scope: "openid profile", login_hint: o.agent_sub,
+    binding_message: `Pay ${PRODUCT.price} for order ${o.id} (${PRODUCT.name})`, requested_expiry: "300" })
+  const j = await r.json()
+  if (!r.ok) { o.status = "failed"; o.reason = j.error_description || j.error; return }
+  Object.assign(o, { auth_req_id: j.auth_req_id, interval: j.interval || 5, next_poll: 0 })
+}
+async function pollOwner(o) {
+  if (o.status !== "pending" || Date.now() < o.next_poll) return
+  o.next_poll = Date.now() + o.interval * 1000
+  const r = await post(await discover(), { grant_type: "urn:openid:params:grant-type:ciba", auth_req_id: o.auth_req_id })
+  const j = await r.json()
+  if (j.error === "authorization_pending") return
+  if (j.error === "slow_down") { o.interval += 5; return }
+  if (j.error) { o.status = j.error === "access_denied" ? "declined" : "expired"; return }
+  // the confirmation must come from the same owner, for the same agent
+  const { payload } = await jwtVerify(j.id_token, JWKS, { issuer: ISSUER, audience: AYA.clientId })
+  if (payload.sub !== o.owner_sub || payload.act?.sub !== o.agent_sub) { o.status = "failed"; o.reason = "wrong person"; return }
+  Object.assign(o, { status: "paid", confirmed_at: payload.auth_time, how: (payload.amr || []).filter(x => x !== "agent") })
 }
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]))
@@ -90,6 +122,8 @@ const OWNERS = `<div class="card"><p><b>Run a website?</b> This is all Demo Shop
 <p class="muted">To end an agent's session the moment its owner revokes it, Demo Shop also
 refreshes its tokens and listens at <code>/auth/backchannel-logout</code> (standard OpenID Connect
 Back-Channel Logout). About 30 lines.</p>
+<p class="muted">Its checkout asks the owner to confirm each payment on their phone, with a standard
+OpenID Connect CIBA request (about 40 lines).</p>
 <p class="muted">Keycloak, Authentik, WordPress and Django work the same way.
 <a href="https://authyouragent.com/docs/developers/sites">Setup guide</a></p></div>`
 
@@ -115,6 +149,48 @@ app.post("/auth/backchannel-logout", express.urlencoded({ extended: false, limit
   }
 })
 app.use("/auth/*", ExpressAuth(authConfig))
+
+app.post("/buy", async (req, res) => {
+  const s = await getSession(req, authConfig)
+  if (!s) return res.redirect(303, "/")
+  for (const [k, o] of orders) if (Date.now() - o.created > 3600e3) orders.delete(k)
+  if (orders.size > 500) return res.status(503).send(page("<h1>Demo Shop</h1><p>Too many open orders; try again later.</p>"))
+  const o = { id: String(1000 + Math.floor(Math.random() * 9000)), key: randomBytes(16).toString("hex"),
+              owner_sub: s.user.owner_sub, agent_sub: s.user.agent_sub, agent: s.user.agent,
+              status: "pending", created: Date.now() }
+  orders.set(o.key, o)
+  await askOwner(o)
+  res.redirect(303, "/order/" + o.key)
+})
+const orderOf = async (req) => {
+  const s = await getSession(req, authConfig), o = orders.get(req.params.key)
+  return s && o && o.owner_sub === s.user.owner_sub ? o : null
+}
+app.get("/order/:key/status", async (req, res) => {
+  const o = await orderOf(req)
+  if (!o) return res.status(404).json({ error: "no such order" })
+  try { await pollOwner(o) } catch (e) { o.status = "failed"; o.reason = e.message }
+  res.set("Cache-Control", "no-store").json({ order: o.id, status: o.status })
+})
+app.get("/order/:key", async (req, res) => {
+  const o = await orderOf(req)
+  if (!o) return res.redirect(303, "/")
+  try { await pollOwner(o) } catch (e) { o.status = "failed"; o.reason = e.message }
+  const when = o.confirmed_at ? new Date(o.confirmed_at * 1000).toISOString().slice(11, 19) + " UTC" : ""
+  const body = {
+    pending: `<p id="st"><b>Waiting for ${esc(o.agent)}'s owner</b> to confirm on their phone.</p>
+      <p class="muted">The shop asked them directly: <i>Pay ${PRODUCT.price} for order ${o.id} (${PRODUCT.name})</i>.
+      ${esc(o.agent)} cannot confirm its own purchase.</p>
+      <script>setInterval(async()=>{const d=await (await fetch(location.pathname+'/status',{cache:'no-store'})).json();if(d.status!=='pending')location.reload()},3000)</script>`,
+    paid: `<p id="st"><b>Paid.</b> The owner confirmed on their phone at ${esc(when)} (${esc((o.how || []).join(", "))}).</p>`,
+    declined: `<p id="st"><b>Not paid.</b> The owner declined on their phone.</p>`,
+    expired: `<p id="st"><b>Not paid.</b> The owner did not answer in time.</p>`,
+    failed: `<p id="st"><b>Not paid.</b> ${esc(o.reason || "The confirmation could not be requested.")}</p>`,
+  }[o.status]
+  res.send(page(`<h1>Order ${o.id}</h1><div class="card"><p>${esc(PRODUCT.name)}, ${PRODUCT.price}</p>${body}</div>
+    <p><a href="/">Back to the shop</a></p>
+    <pre id="j" hidden>${esc(JSON.stringify({ order: o.id, status: o.status }))}</pre>`))
+})
 app.get("/", async (req, res) => {
   const s = await getSession(req, authConfig)
   if (!s) return res.send(page(`<h1>Demo Shop</h1><p>You are not signed in.</p>
@@ -132,6 +208,10 @@ app.get("/", async (req, res) => {
     <p><span class="k">How the owner approved</span><br>${esc(how.join(", ") || "-")}${how.includes("grant") ? " (an earlier approval covered it)" : ""}</p>
     <p><span class="k">Owner ID on this site</span><br><code>${esc(u.owner_sub)}</code></p>
     <p><span class="k">Agent ID on this site</span><br><code>${esc(u.agent_sub)}</code></p></div>
+    <div class="card"><p><b>${esc(PRODUCT.name)}</b>, ${PRODUCT.price}</p>
+    <form method="post" action="/buy"><button id="buy">Buy</button></form>
+    <p class="muted">Before charging, the shop asks the agent's owner to confirm on their phone
+      (OpenID Connect CIBA). The agent cannot approve its own purchase.</p></div>
     <form method="post" action="/auth/signout"><input type="hidden" name="csrfToken" id="c"><button>Sign out</button></form>
     <script>fetch('/auth/csrf').then(r=>r.json()).then(d=>document.getElementById('c').value=d.csrfToken)</script>
     <pre id="j" hidden>${esc(JSON.stringify({ signed_in: true, user: u }))}</pre>`))

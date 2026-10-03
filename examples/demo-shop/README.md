@@ -7,6 +7,11 @@ The live demo at https://demo.authyouragent.com: a plain [Auth.js](https://authj
 - **Ending sessions when the owner revokes:** the `jwt` callback refreshes tokens (a refresh fails once
   the owner revokes), and `POST /auth/backchannel-logout` accepts the provider's OpenID Connect
   Back-Channel Logout token. Demo Shop keeps ended sign-ins in memory; a real site would use its database.
+- **Confirming a payment with the owner:** `POST /buy` sends an OpenID Connect CIBA request
+  (`/oidc/bc-authorize`, `login_hint` = the agent's `act.sub`, `binding_message` = what is being paid) and
+  the order page polls the token endpoint. The owner's phone shows the shop's message; the order is paid
+  only after the owner confirms, and the returned ID token is checked to name the same owner and agent.
+  The agent cannot approve its own purchase. Orders live in memory here.
 
 Run it:
 
