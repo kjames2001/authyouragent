@@ -1,0 +1,13 @@
+WEBVTT
+
+00:00.200 --> 00:07.525
+An AI agent, already signed in to Demo Shop as James's agent, goes to buy a lamp.
+
+00:07.925 --> 00:15.475
+It presses Buy. Its own vault stops it first, and asks James. That took eighteen seconds.
+
+00:15.875 --> 00:24.225
+Then the shop asks James itself, with a standard OpenID Connect request. The agent can't answer it.
+
+00:24.625 --> 00:31.125
+James confirms with a passkey. Paid. Twenty-four seconds from Buy to Paid.

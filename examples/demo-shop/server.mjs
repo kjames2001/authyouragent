@@ -123,7 +123,8 @@ const OWNERS = `<div class="card"><p><b>Run a website?</b> This is all Demo Shop
 refreshes its tokens and listens at <code>/auth/backchannel-logout</code> (standard OpenID Connect
 Back-Channel Logout). About 30 lines.</p>
 <p class="muted">Its checkout asks the owner to confirm each payment on their phone, with a standard
-OpenID Connect CIBA request (about 40 lines).</p>
+OpenID Connect CIBA request (about 40 lines).
+<a href="https://authyouragent.com/static/video/demo-shop-checkout.mp4">Watch a recorded checkout</a> (31 s).</p>
 <p class="muted">Keycloak, Authentik, WordPress and Django work the same way.
 <a href="https://authyouragent.com/docs/developers/sites">Setup guide</a></p></div>`
 

@@ -57,6 +57,24 @@
     </video>
 </div></section>
 
+<section class="band"><div class="in video-band">
+  <div>
+    <h2>Buying: the shop asks the owner, not the agent</h2>
+    <p class="sub">Demo Shop's checkout asks the agent's owner to confirm each payment on their phone, with a
+      standard OpenID Connect request (CIBA). The agent can press Buy, but it cannot approve its own purchase.</p>
+    <p>Two checks, each on the owner's phone: the vault's own guard before the agent presses Buy, then the shop's
+      request with its own message, "Pay $45.00 for order 8197". In this recording it took 24 seconds from Buy to Paid.</p>
+    <p><b>Running a website?</b> The checkout is about 40 lines in
+      <a href="https://github.com/kjames2001/authyouragent/tree/main/examples/demo-shop">Demo Shop's source</a>.
+      <a href="/docs/developers/sites">See how &rarr;</a></p>
+  </div>
+  <video class="explainer" controls playsinline preload="none" poster="/static/video/demo-shop-checkout.jpg?v=1"
+      aria-label="31-second narrated recording: an AI agent presses Buy in Demo Shop, its vault and then the shop ask the owner, and the order is paid after a passkey confirmation">
+      <source src="/static/video/demo-shop-checkout.mp4?v=1" type="video/mp4">
+      <track kind="captions" srclang="en" label="English" src="/static/video/demo-shop-checkout.en.vtt?v=1">
+    </video>
+</div></section>
+
 <section class="band"><div class="in">
   <h2>The problem with agents today</h2>
   <p class="sub">An agent that books, buys or applies for you usually gets your password or
