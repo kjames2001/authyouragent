@@ -16,8 +16,11 @@ Always asks, in every mode except as noted:
   security    password, email, two-factor, keys, authorize/grant (asks even
               in off)
   unknown     the vault could not read the action clearly
-Smart also pauses on a site for an hour after the owner denies something
-there, and once the hourly limit is used up.
+Smart also pauses for an hour after the owner denies something, and once
+the hourly limit is used up. The owner chooses what a deny pauses (per agent,
+in the app): the whole domain (default: a deny on shop.example.com also pauses
+example.com and its other subdomains) or only the exact address it happened on
+(the host, e.g. shop.example.com).
 
 Only the vault's own approval cards use modes. A site that asks the owner
 itself (step-up, CIBA, sign-in) always asks: that is the site's rule, not ours.
@@ -30,6 +33,8 @@ MODES = ("ask", "smart", "off")
 DEFAULT_LIMIT = 20          # smart: actions per agent, per site, per hour
 MAX_LIMIT = 200
 PAUSE_AFTER_DENY = 3600     # smart pauses on a site this long after a deny
+PAUSE_SCOPES = ("domain", "host")
+HOST_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?)+$")
 
 MONEY = re.compile(
     r"\b(pay|payment|purchase|buy|order|checkout|check out|subscribe|upgrade|donate|"
@@ -93,6 +98,8 @@ def migrate(c):
       user_id TEXT NOT NULL, agent_id TEXT NOT NULL, site TEXT NOT NULL,
       mode TEXT NOT NULL, hourly_limit INTEGER, updated_at INTEGER,
       PRIMARY KEY(user_id, agent_id, site))""")
+    if "pause_scope" not in {r[1] for r in c.execute("PRAGMA table_info(approval_modes)")}:
+        c.execute("ALTER TABLE approval_modes ADD COLUMN pause_scope TEXT")
     cols = {r[1] for r in c.execute("PRAGMA table_info(authnz_requests)")}
     if "details" not in cols:
         c.execute("ALTER TABLE authnz_requests ADD COLUMN details TEXT")
@@ -100,15 +107,35 @@ def migrate(c):
 
 def get_modes(c, user_id, agent_id):
     """{"default": {...}, "sites": {site: {...}}} for the app."""
-    out = {"default": {"mode": "ask", "hourly_limit": DEFAULT_LIMIT}, "sites": {}}
-    for r in c.execute("SELECT site, mode, hourly_limit FROM approval_modes "
+    out = {"default": {"mode": "ask", "hourly_limit": DEFAULT_LIMIT}, "sites": {},
+           "pause_scope": "domain"}
+    for r in c.execute("SELECT site, mode, hourly_limit, pause_scope FROM approval_modes "
                        "WHERE user_id=? AND agent_id=?", (user_id, agent_id)):
         v = {"mode": r[1], "hourly_limit": r[2] or DEFAULT_LIMIT}
         if r[0] == "*":
             out["default"] = v
+            out["pause_scope"] = r[3] if r[3] in PAUSE_SCOPES else "domain"
         else:
             out["sites"][r[0]] = v
     return out
+
+
+def pause_scope(c, user_id, agent_id):
+    r = c.execute("SELECT pause_scope FROM approval_modes WHERE user_id=? AND agent_id=? AND site='*'",
+                  (user_id, agent_id)).fetchone()
+    return r[0] if r and r[0] in PAUSE_SCOPES else "domain"
+
+
+def set_pause_scope(c, user_id, agent_id, scope):
+    """What a deny pauses: "domain" (the whole domain) or "host" (only the
+    exact address). Kept on the agent's all-sites row; creating that row
+    keeps the mode at Ask."""
+    if scope not in PAUSE_SCOPES:
+        raise ValueError("the pause covers the domain or the exact address")
+    c.execute("INSERT INTO approval_modes(user_id, agent_id, site, mode, hourly_limit, updated_at, pause_scope) "
+              "VALUES(?,?,'*','ask',?,?,?) ON CONFLICT(user_id, agent_id, site) DO UPDATE SET "
+              "pause_scope=excluded.pause_scope, updated_at=excluded.updated_at",
+              (user_id, agent_id, DEFAULT_LIMIT, int(time.time()), scope))
 
 
 def set_mode(c, user_id, agent_id, site, mode, hourly_limit=None):
@@ -147,8 +174,10 @@ def _site_rule(c, user_id, agent_id, site):
 
 
 def decide(c, user_id, agent_id, site, label, details=None, now=None):
-    """(auto: bool, why: str). auto=True means approve without asking."""
+    """(auto: bool, why: str). auto=True means approve without asking.
+    `site` is the domain; details["host"] (vault 0.3.20+) the exact address."""
     now = now or int(time.time())
+    host = (details or {}).get("host")
     mode, limit, where = _site_rule(c, user_id, agent_id, site)
     cat, reason = classify(label, details)
     scope = "all sites" if where == "*" else where
@@ -161,11 +190,18 @@ def decide(c, user_id, agent_id, site, label, details=None, now=None):
     # smart
     if cat != "low":
         return False, f"Smart ({scope}): {reason}, so it asks"
-    denied = c.execute("SELECT 1 FROM authnz_requests WHERE user_id=? AND agent_id=? AND site=? "
-                       "AND kind='agent_approval' AND status='denied' AND created_at>? LIMIT 1",
-                       (user_id, agent_id, site, now - PAUSE_AFTER_DENY)).fetchone()
-    if denied:
-        return False, f"Smart is paused on {site} for an hour after you denied something there"
+    q = ("SELECT 1 FROM authnz_requests WHERE user_id=? AND agent_id=? AND site=? "
+         "AND kind='agent_approval' AND status='denied' AND created_at>?")
+    args = [user_id, agent_id, site, now - PAUSE_AFTER_DENY]
+    paused_on = site
+    # exact address: only denies on this host count. A vault too old to send
+    # the host pauses the whole domain, the safe side.
+    if host and pause_scope(c, user_id, agent_id) == "host":
+        q += " AND json_extract(details, '$.host')=?"
+        args.append(host)
+        paused_on = host
+    if c.execute(q + " LIMIT 1", args).fetchone():
+        return False, f"Smart is paused on {paused_on} for an hour after you denied something there"
     used = c.execute("SELECT COUNT(*) FROM authnz_requests WHERE user_id=? AND agent_id=? AND site=? "
                      "AND kind='agent_approval' AND status='approved' AND approved_via='smart' "
                      "AND created_at>?", (user_id, agent_id, site, now - 3600)).fetchone()[0]
@@ -186,6 +222,9 @@ def clean_details(d):
     # the vault falls back to the button's words for the item: not worth a line
     if out.get("item") and out.get("label") and words(out["item"]).lower() == words(out["label"]).lower():
         del out["item"]
+    h = d.get("host")
+    if isinstance(h, str) and HOST_RE.match(h.strip().lower()) and len(h) <= 253:
+        out["host"] = h.strip().lower()
     for k in ("card_fields", "password_fields"):
         if d.get(k) is True:
             out[k] = True

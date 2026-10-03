@@ -1132,6 +1132,7 @@ async def _details(page, selector, label):
         d = {}
     d = {k: v for k, v in (d or {}).items() if v}
     d["label"] = (label or "")[:80]
+    d["host"] = (urlparse(page.url).hostname or "").lower()   # for a pause on the exact address
     try:
         d["page"] = (await page.title())[:200]
     except Exception:

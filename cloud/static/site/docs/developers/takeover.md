@@ -81,7 +81,7 @@ Whatever the mode, these always ask:
 - **account and security**: password, email, two-factor, keys, permissions (these ask even on an Off site);
 - **anything unclear**: an unlabelled button, or wording that is not on the low-risk list.
 
-Smart also pauses on a site for an hour after the owner denies something there.
+Smart also pauses for an hour after the owner denies something. The owner chooses what a deny pauses: the **whole domain** (the default: a deny on shop.example.com also pauses example.com and its other addresses) or **that exact address only** (just shop.example.com). Vaults before 0.3.20 do not send the exact address, so for them a deny always pauses the whole domain.
 
 **Rules only.** Modes decide from the button's words, the form's fields, any amount, the site and the limits. There is no model involved, so every decision can be explained, and nothing a page says can talk its way past them. The agent cannot change its own mode: only the owner, signed in to the app, can.
 
