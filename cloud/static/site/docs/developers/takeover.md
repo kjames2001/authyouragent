@@ -63,12 +63,38 @@ What the vault enforces, whatever the agent does:
 - **Chromium's sandbox on**, all container capabilities dropped; under gVisor automatically when Docker has the `runsc` runtime.
 - **Sign out first, wipe second.** At the end of a session, and when the agent stops sending heartbeats or is revoked, the vault signs out of each site, confirms it where it can, then destroys the in-memory profile. Sites it could not sign out of are reported to the owner, also after a crash.
 
+## Approval modes
+
+Every click that commits something (buy, post, delete, submit a form) waits for the owner's approval on their phone. The owner chooses, per agent and per site, how often that happens. In the app: **Agents → Approvals**.
+
+| Mode | What asks |
+|---|---|
+| **Ask** (default) | Every committing click. |
+| **Smart** | Only what matters. Changes the owner can undo in a click go through without asking: save, update settings, filter or sort, add to cart or a list, archive, mark as read, star, pin. Up to an hourly limit per site (20 by default, up to 200). |
+| **Off** | Nothing on that site, except account and security changes. Only per site, never for all sites. |
+
+Whatever the mode, these always ask:
+
+- **money**: an amount on the button's form, card-number fields, or pay, buy, order, subscribe and similar wording;
+- **deleting**: delete, remove, cancel, close, revoke;
+- **acting as the owner**: post, send, comment, reply, share, invite, merge, deploy;
+- **account and security**: password, email, two-factor, keys, permissions (these ask even on an Off site);
+- **anything unclear**: an unlabelled button, or wording that is not on the low-risk list.
+
+Smart also pauses on a site for an hour after the owner denies something there.
+
+**Rules only.** Modes decide from the button's words, the form's fields, any amount, the site and the limits. There is no model involved, so every decision can be explained, and nothing a page says can talk its way past them. The agent cannot change its own mode: only the owner, signed in to the app, can.
+
+**The approval card shows what the vault read from the page:** the amount, item and order number from the button's own form or section (not a total elsewhere on the page). Each approval is for that one action, works once, and expires after five minutes. If the amount changes between the approval and the click, the vault does not click and asks again. Activity lists every card with what it showed, every action that went through without asking and why, and every change of mode.
+
+For the agent nothing changes: the click returns when it is approved, by the owner or by their mode, and fails with `the owner did not approve` otherwise.
+
 ## Trusted sites
 
 The vault's rules suit most sites. For a site the owner uses all the time, or a service on their own network, they can relax them:
 
 ```bash
-authyouragent vault trust example.com --no-approvals     # clicks on example.com stop asking each time
+authyouragent vault trust example.com --no-approvals     # clicks on example.com stop asking each time (or set Off for the site in the app)
 authyouragent vault trust 192.168.1.20:8123 --private    # the browser may open this host on your own network
 authyouragent vault trust                                # list
 authyouragent vault trust example.com --remove

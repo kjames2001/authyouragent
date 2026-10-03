@@ -40,6 +40,11 @@ The `authyouragent-mcp` command starts an MCP server with nineteen tools:
   `wait_for`, `screenshot`. Only public websites open. Anything that submits
   a form, or whose button says create, send, save, delete, pay and the like,
   waits for your approval on your phone.
+- **Approval modes** (in the app, per agent and site): Ask, Smart or Off.
+  Smart lets changes you can undo (save, filter, add to cart) through without
+  asking; money, deleting, posting and account changes always ask. Rules
+  only, no AI. The approval card shows the amount and item read from the
+  page, and the vault will not click if the amount changed after you approved.
 - **Trusted sites:** `authyouragent vault trust example.com --no-approvals`
   stops per-click approvals on a site you use often;
   `authyouragent vault trust 192.168.1.20:8123 --private` lets the browser

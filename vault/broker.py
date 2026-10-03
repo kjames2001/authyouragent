@@ -1084,6 +1084,61 @@ TARGET_JS = r"""(el) => {
 }"""
 
 
+# What the approval card shows besides the button's words: an amount, the item
+# and an order number, read from the action's form or the nearest container
+# around the button, never from the whole page (a basket total elsewhere on the
+# page is not what this button pays). Also: does the form take card details or
+# passwords. Read again just before the click: if the amount changed after
+# the owner approved, the click is refused.
+DETAILS_JS = r"""(el) => {
+  const text = s => (s || '').replace(/\s+/g, ' ').trim();
+  const btn = el.closest('button,a,[role=button],input[type=submit],input[type=button]') || el;
+  const form = btn.form || btn.closest('form');
+  // the action's own area: its form, else the smallest ancestor with an amount
+  let area = form;
+  const MONEY = /(?:[$€£¥₹]|\b(?:USD|EUR|GBP|BWP|ZAR|P)\s?)\s?\d[\d,]*(?:\.\d{1,2})?|\d[\d,]*(?:\.\d{1,2})?\s?(?:USD|EUR|GBP|BWP|ZAR)\b/;
+  if (!area || !MONEY.test(area.innerText || '')) {
+    let n = btn.parentElement, depth = 0;
+    while (n && n !== document.body && depth < 6) {
+      if ((n.innerText || '').length > 1500) break;
+      if (MONEY.test(n.innerText || '')) { area = n; break; }
+      n = n.parentElement; depth++;
+    }
+  }
+  const t = area ? text(area.innerText) : '';
+  // the button's own words win: "Pay $45.00" says exactly what it pays
+  const own = text(btn.innerText || btn.value || '');
+  const amount = (own.match(MONEY) || t.match(MONEY) || [''])[0];
+  const order = (t.match(/\border\s*(?:no\.?|number|#|id)?\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{2,24})\b/i) || [])[1] || '';
+  // the item: the area's heading or first strong line, without the amount
+  let item = '';
+  if (area) {
+    const h = area.querySelector('h1,h2,h3,h4,b,strong,[itemprop=name],.title,.name');
+    item = h ? text(h.innerText) : '';
+  }
+  if (!item && area) item = text((area.innerText || '').split('\n').find(l => l.trim() && !/^(buy|pay|order|checkout)/i.test(l.trim())) || '');
+  item = text(item.replace(MONEY, '').replace(/[,\s]+$/, ''));
+  const inputs = form ? [...form.querySelectorAll('input')] : [];
+  const card = inputs.some(i => /cc-|card|cvc|cvv/i.test((i.autocomplete || '') + ' ' + (i.name || '') + ' ' + (i.id || '')));
+  return {amount: amount.slice(0, 40), item: item.slice(0, 120), order: order.slice(0, 60),
+          card_fields: card, password_fields: inputs.filter(i => i.type === 'password').length >= 2};
+}"""
+
+
+async def _details(page, selector, label):
+    try:
+        d = await page.locator(selector).first.evaluate(DETAILS_JS)
+    except Exception:
+        d = {}
+    d = {k: v for k, v in (d or {}).items() if v}
+    d["label"] = (label or "")[:80]
+    try:
+        d["page"] = (await page.title())[:200]
+    except Exception:
+        pass
+    return d
+
+
 def _needs_approval(label, submits_form=False):
     """True when the action commits something: its wording says so, or it
     submits a form (whatever the wording). Callers exempt sign-in and search."""
@@ -1094,17 +1149,25 @@ def _needs_approval(label, submits_form=False):
     return bool(label) and bool(SENSITIVE.search(label) or any(w.lower() in label.lower() for w in EXTRA))
 
 
-async def _approve(page, label, site=None):
+async def _approve(page, label, site=None, details=None):
     """Ask the owner, on their phone, to approve `label` on this site. Returns
-    approved / denied / expired / cancelled."""
+    approved / denied / expired / cancelled. `details` (amount, item, order
+    read from the page) go on the card; the owner's approval mode in the
+    cloud may approve at once, without asking (rules only, no AI)."""
     agent = V.agent()
     site = site or _site(urlparse(page.url).hostname)
     action = re.sub(r"[^a-z0-9_:-]", "", label.lower().replace(" ", "_"))[:64] or "action"
-    r = await asyncio.to_thread(agent.client.post, f"{agent.base}/api/v1/agent-approval", json={
-        "agent_id": agent.agent_id, "agent_jwt": agent._agent_jwt(), "site": site, "action": action})
+    body = {"agent_id": agent.agent_id, "agent_jwt": agent._agent_jwt(), "site": site, "action": action}
+    if details:
+        body["details"] = {**details, "label": details.get("label") or label[:80]}
+    r = await asyncio.to_thread(agent.client.post, f"{agent.base}/api/v1/agent-approval", json=body)
     if r.status_code != 200:
         raise RuntimeError(f"approval request refused: {r.status_code} {r.text[:200]}")
-    txn = r.json()["txn_id"]
+    j = r.json()
+    txn = j["txn_id"]
+    if j.get("auto"):
+        _log("approved by the owner's approval mode:", site, action, j.get("why", ""))
+        return "approved"
     _log("approval requested:", site, action, txn)
     deadline = time.time() + APPROVAL_WAIT
     while time.time() < deadline:
@@ -1249,9 +1312,16 @@ async def _guarded(page, selector, label_of, act, submits_form):
     form_rule = submits_form(info) and not info["searchForm"] and not _is_auth_step(page.url)
     if not sign_in and _needs_approval(label, form_rule):
         label = label or "submit form"
-        result = await _approve(page, label)
+        details = await _details(page, selector, label)
+        result = await _approve(page, label, details=details)
         if result != "approved":
             raise NotApproved(f"the owner did not approve '{label}' ({result})")
+        # the page may have changed while the owner looked: an approval is for
+        # what they were shown, so a different amount is a different action
+        now = await _details(page, selector, label)
+        if details.get("amount") and now.get("amount") != details.get("amount"):
+            raise NotApproved(f"the amount changed after approval ({details['amount']} -> "
+                              f"{now.get('amount') or 'none'}); not clicked. Ask again.")
         return await act()
     if sign_in or info["searchForm"] or _is_auth_step(page.url):
         return await act()
