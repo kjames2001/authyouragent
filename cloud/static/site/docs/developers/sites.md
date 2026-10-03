@@ -84,9 +84,35 @@ To end sessions when the owner revokes, keep the tokens in the `jwt` callback an
 
 Add an **OpenID Connect** identity provider with discovery URL `https://authyouragent.com/.well-known/openid-configuration`, the client ID and secret, client authentication "client secret sent as basic auth", and scopes `openid profile`. Use the callback address the server shows you when registering.
 
-### WordPress
+### WordPress and WooCommerce
 
-With the [OpenID Connect Generic Client](https://wordpress.org/plugins/daggerhart-openid-connect-generic/) plugin: Login type "button", scope `openid profile email`, endpoints from the discovery document above (`/oidc/authorize`, `/oidc/token`, `/oidc/userinfo`), identity key `sub`, nickname key `agent_name`. Callback address: `https://your-site/wp-admin/admin-ajax.php?action=openid-connect-authorize`.
+Tested with WordPress 7.1, WooCommerce 11.1 and the open-source [OpenID Connect Generic Client](https://wordpress.org/plugins/daggerhart-openid-connect-generic/) plugin 3.11.3. Callback address to register: `https://your-site/wp-admin/admin-ajax.php?action=openid-connect-authorize`.
+
+Settings, OpenID Connect Client:
+
+- Login Type: OpenID Connect button on login form. Client ID and secret from your registration.
+- OpenID Scope: `openid profile`. Agents then sign in without sharing the owner's email.
+- Login Endpoint URL `https://authyouragent.com/oidc/authorize`, Userinfo `https://authyouragent.com/oidc/userinfo`, Token Validation `https://authyouragent.com/oidc/token`, JWKS `https://authyouragent.com/oidc/jwks`, Issuer `https://authyouragent.com`. Leave End Session empty.
+- Identity Key: `preferred_username`. Nickname Key: `preferred_username`. Email Formatting: empty. Display Name Formatting: `{name}`.
+- Turn on: Create user if does not exist, Enable Refresh Token, Redirect Back to Origin Page. Leave "Link Existing Users" off, so an agent never takes over the owner's own account.
+
+The agent gets its own account, for example `jarvis-0be034`, shown as "Jarvis (agent of James)", with the site's default role (Customer on WooCommerce).
+
+**WooCommerce.** The button appears on `wp-login.php`. To show it on the shop's My Account page as well, put the shortcode `[openid_connect_generic_login_button]` above `[woocommerce_my_account]` on that page.
+
+**Revocation.** WordPress has no back-channel logout, so it relies on refresh: the session ends at the next page load after the access token expires (10 minutes at most). Plugin 3.11.3 never runs its own refresh check ([issue #675](https://github.com/oidc-wp/openid-connect-generic/issues/675), fix pending in [PR #678](https://github.com/oidc-wp/openid-connect-generic/pull/678)). Until that ships, add this file as `wp-content/mu-plugins/aya-token-refresh.php`:
+
+```php
+<?php
+// Runs the OpenID Connect Generic Client token refresh that 3.11.3 never calls.
+add_action( 'init', function () {
+	if ( class_exists( 'OpenID_Connect_Generic' ) && OpenID_Connect_Generic::instance()->client_wrapper ) {
+		OpenID_Connect_Generic::instance()->client_wrapper->ensure_tokens_still_fresh();
+	}
+}, 11 );
+```
+
+With it, our test shop signed the agent out at the first page load after the token expired.
 
 ### Django (django-allauth)
 
