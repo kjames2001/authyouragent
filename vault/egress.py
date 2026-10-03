@@ -10,15 +10,31 @@ debug port, the vault's own API, and the owner's local network.
 
 VAULT_ALLOW_HOSTS (comma separated host or host:port) lets named test hosts
 through; it is for local testing only.
+
+Owner-trusted private hosts (trust.py, "private": true, confirmed on the
+owner's phone this session) may reach LAN / tailnet addresses, never
+loopback, link-local or this container's own addresses.
 """
 import asyncio
 import ipaddress
 import os
 import socket
 
+import trust
+
 PORT = 3128
 ALLOW = {h.strip().lower() for h in os.environ.get("VAULT_ALLOW_HOSTS", "").split(",") if h.strip()}
 IDLE_S = 300
+
+
+def _own_ips():
+    try:
+        return set(socket.gethostbyname_ex(socket.gethostname())[2])
+    except Exception:
+        return set()
+
+
+OWN = _own_ips()
 
 
 def _public(ip):
@@ -34,9 +50,13 @@ async def _resolve(host, port):
         return infos[0][4][0]
     infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
     ips = [i[4][0] for i in infos]
-    if not ips or not all(_public(ip) for ip in ips):
-        return None
-    return ips[0]
+    if ips and all(_public(ip) for ip in ips):
+        return ips[0]
+    # The owner's own network, for a host they trusted and confirmed
+    if ips and trust.private_allowed(host.strip("[]"), port) \
+            and all(trust.private_ip_ok(ip) and ip not in OWN for ip in ips):
+        return ips[0]
+    return None
 
 
 async def _pipe(r, w):

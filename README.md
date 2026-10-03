@@ -12,7 +12,7 @@ The MCP server, the browser vault and the SDKs:
 
 | Path | What it is |
 |---|---|
-| [`sdk/authyouragent/mcp_server.py`](sdk/authyouragent/mcp_server.py) | **The MCP server** (stdio, 13 tools). Entry point `authyouragent-mcp`. |
+| [`sdk/authyouragent/mcp_server.py`](sdk/authyouragent/mcp_server.py) | **The MCP server** (stdio, 19 tools). Entry point `authyouragent-mcp`. |
 | [`vault/`](vault/) | **The browser vault**: [`broker.py`](vault/broker.py) (HTTP API the MCP server calls; drives Chromium, detects sign-in, signs out), [`egress.py`](vault/egress.py) (public-internet-only proxy), [`screen.py`](vault/screen.py) (phone screen stream), [`seccomp.json`](vault/seccomp.json), [`chromium-policy.json`](vault/chromium-policy.json), [`Dockerfile`](vault/Dockerfile). Details: [vault/README.md](vault/README.md). |
 | [`sdk/authyouragent/vault_cli.py`](sdk/authyouragent/vault_cli.py) | `authyouragent vault up/down/status/env`: runs the vault with every protection on. |
 | [`sdk/authyouragent/`](sdk/authyouragent/) | Python SDK: agent side ([`agent.py`](sdk/authyouragent/agent.py)), website side ([`site.py`](sdk/authyouragent/site.py)), take-over helper for your own Playwright browser ([`takeover.py`](sdk/authyouragent/takeover.py)). |

@@ -112,8 +112,13 @@ Node-based MCP clients can use `"command": "npx", "args": ["authyouragent-mcp"]`
 
 ### Your tools
 
-- **`navigate(url)`**, **`click(selector)`**, **`type_text(selector, text, submit)`**, **`read_page()`**: drive the vault's browser. Only public websites open; a local or private address returns "blocked by the vault". A click (or Enter) that submits a form, or whose button says create, send, save, delete, pay and the like, first asks your user on their phone and waits; so does any other click that makes the page send data to the site. If they deny it, the tool returns an error and nothing happens. Search boxes and sign-in steps are not interrupted. If the vault is not running, the first browser tool starts it; the very first start downloads about 500 MB and may answer "the browser vault is starting": call the tool again in a minute.
-- **`list_secrets`**, **`fill_secret(selector, name, field)`**: sign-ins your user has shared from their password manager. `list_secrets` shows names, sites and fields, never values. `fill_secret` types a `username`, `password` or `totp` code into a field; you never see it. It works only on the item's own site and only for the right kind of field. Use it before asking for a take over when an item for the site exists. Your user may not have set up a password manager at all; then these tools say so, and take over is the way in. Take over is also the way past what a saved sign-in cannot fill: CAPTCHAs, codes sent by text or email, approvals on another device, passkeys, sites with no saved item, and any sign-in your user prefers to do personally.
+- **`navigate(url)`**: opens a page. Only public websites open, plus any private host your user has trusted (see below); anything else returns "blocked by the vault". If the vault is not running, the first browser tool starts it; the very first start downloads about 500 MB and may answer "the browser vault is starting": call the tool again in a minute.
+- **`read_page()`**: the page's address, title and visible text, then a numbered list of what you can act on: links, buttons, fields with their values, dropdowns with their options, checkboxes with their state. Password values are never shown. Pass a number as `ref` to the tools below. The numbers change on every `read_page`, so read again after the page changes; an old number returns "call read_page again".
+- **`click(ref)`**, **`type_text(text, ref, submit)`**, **`select_option(option, ref)`**, **`press_key(key, ref)`**: act on an element by its number. You can give a CSS `selector` instead of `ref`. `press_key` takes Enter, Space, Tab, Shift+Tab, Escape, Backspace, Delete, the arrow keys, PageUp, PageDown, Home and End.
+- **`scroll(direction)`**, **`go_back()`**, **`wait_for(text, gone, seconds)`**, **`screenshot()`**: scroll down, up, to the top or to the bottom (this also loads more on endless pages), go back, wait until some text appears or disappears instead of guessing with pauses, and see the page as an image when the text is not enough.
+- **Approvals:** a click, an Enter or a Space that submits a form, or whose button says create, send, save, delete, pay and the like, first asks your user on their phone and waits. So does a dropdown or any other action that makes the page send data to the site. If they deny it, the tool returns an error and nothing happens. Search boxes and sign-in steps are not interrupted.
+- **Trusted sites:** your user can list sites where you may click without a phone approval each time, and hosts on their own network you may open (`authyouragent vault trust`). Each entry asks your user once per session on their phone before it applies. Do not ask your user to add entries for you; suggest it only if they complain about approvals on a site they use often.
+- **`list_secrets`**, **`fill_secret(name, field, ref)`**: sign-ins your user has shared from their password manager. `list_secrets` shows names, sites and fields, never values. `fill_secret` types a `username`, `password` or `totp` code into a field; you never see it. It works only on the item's own site and only for the right kind of field. Use it before asking for a take over when an item for the site exists. Your user may not have set up a password manager at all; then these tools say so, and take over is the way in. Take over is also the way past what a saved sign-in cannot fill: CAPTCHAs, codes sent by text or email, approvals on another device, passkeys, sites with no saved item, and any sign-in your user prefers to do personally.
 - **`check_login_wall`**: is the page asking for a password, a CAPTCHA, a code or a sign-in approval? If yes, it tells you to call `request_takeover`.
 - **`request_takeover(reason)`**: asks your user to take over. Returns `done`, `cancelled`, `expired` or `incomplete`, each with a line saying what to do next, or `waiting` with a `takeover_id` if your user needs longer.
 - **`wait_for_takeover(takeover_id)`**: keeps waiting after `waiting`.
@@ -127,9 +132,11 @@ Typical usage:
 ```
 1. check_agent_status.
 2. navigate to the page, then check_login_wall.
-3. If blocked and list_secrets has an item for the site: fill_secret the username and password, click Sign in, fill_secret the totp if asked.
+3. If blocked and list_secrets has an item for the site: read_page, fill_secret the username and password by ref,
+   click Sign in, fill_secret the totp if asked.
    Otherwise tell your user: "I need you to sign in to example.com. I'll send a request to your phone."
-4. request_takeover if still blocked. When it returns "done", continue with navigate, click, type_text, read_page.
+4. request_takeover if still blocked. When it returns "done", continue: read_page, then click / type_text /
+   select_option by ref, and read_page again after each change.
 5. end_session when you are done.
 ```
 

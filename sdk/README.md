@@ -32,11 +32,19 @@ For just the SDK (no browser, no MCP): `pip install authyouragent`.
 
 ## MCP server
 
-The `authyouragent-mcp` command starts an MCP server with thirteen tools:
+The `authyouragent-mcp` command starts an MCP server with nineteen tools:
 
-- **Browser:** `navigate`, `click`, `type_text`, `read_page`. Only public
-  websites open. Clicks that submit a form, or whose button says create, send,
-  save, delete, pay and the like, wait for your approval on your phone.
+- **Browser:** `navigate`, `read_page` (the page's text plus a numbered list
+  of links, buttons, fields and dropdowns), and `click`, `type_text`,
+  `select_option`, `press_key` by that number. `scroll`, `go_back`,
+  `wait_for`, `screenshot`. Only public websites open. Anything that submits
+  a form, or whose button says create, send, save, delete, pay and the like,
+  waits for your approval on your phone.
+- **Trusted sites:** `authyouragent vault trust example.com --no-approvals`
+  stops per-click approvals on a site you use often;
+  `authyouragent vault trust 192.168.1.20:8123 --private` lets the browser
+  open one host on your own network. Each entry asks your phone once per
+  session before it applies.
 - **`check_login_wall`**: is the page asking for a password, a code or a
   sign-in approval?
 - **`list_secrets`** / **`fill_secret`**: fill a username, password or

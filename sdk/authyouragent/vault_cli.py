@@ -16,6 +16,7 @@ the agent key readable by the vault user, the crash record volume).
 """
 import argparse
 import json
+import re
 import os
 import secrets
 import shutil
@@ -186,6 +187,8 @@ def start(agent_id, key, cloud="https://authyouragent.com", image=IMAGE, gvisor=
         args += ["-v", f"{_bitwarden_copy(bw)}:/run/secrets/bitwarden.json:ro"]
     elif (HOME / "bitwarden.json").is_file():
         args += ["-v", f"{HOME / 'bitwarden.json'}:/run/secrets/bitwarden.json:ro"]
+    # Trusted sites: a directory (not a file) so edits reach the running vault
+    args += ["-v", f"{_trust_dir()}:/run/secrets/trust:ro", "-e", "VAULT_TRUST_FILE=/run/secrets/trust/trusted.json"]
     if use_gvisor:
         args += ["--runtime", "runsc"]
     _docker(*args, image)
@@ -193,6 +196,76 @@ def start(agent_id, key, cloud="https://authyouragent.com", image=IMAGE, gvisor=
         _die(f"started but not answering; see `docker logs {NAME}`")
     log(f"vault running on 127.0.0.1:{PORT}  (browser sandbox: on, gVisor: {'on' if use_gvisor else 'off'})")
     return "started"
+
+
+TRUST_HELP = """Trusted sites: your own exceptions to the vault's rules.
+  authyouragent vault trust                      list them
+  authyouragent vault trust example.com --no-approvals
+        clicks on example.com stop asking you each time
+  authyouragent vault trust 192.168.1.20:8123 --private
+        the browser may open that host on your own network
+  authyouragent vault trust example.com --remove
+Saved passwords stay hidden from the agent either way. Each entry still asks
+you once on your phone per session before it takes effect, so an agent that
+edits the file cannot use it on its own. Loopback, link-local (cloud metadata)
+and the vault itself stay blocked whatever the file says."""
+
+
+def _trust_dir():
+    d = HOME / "trust"
+    d.mkdir(parents=True, exist_ok=True)
+    os.chmod(d, 0o755)
+    return d
+
+
+def _trust_file():
+    return _trust_dir() / "trusted.json"
+
+
+def trust_cmd(a):
+    f = _trust_file()
+    data = json.loads(f.read_text()) if f.is_file() else {"sites": {}}
+    sites = data.setdefault("sites", {})
+    if not a.site:
+        if not sites:
+            print("no trusted sites")
+        for k, v in sorted(sites.items()):
+            bits = []
+            if v.get("approvals") is False:
+                bits.append("no per-click approvals")
+            if v.get("private"):
+                bits.append("private network")
+            print(f"{k}: {', '.join(bits) or 'nothing'}")
+        return
+    key = a.site.strip().lower()
+    for pre in ("https://", "http://"):
+        if key.startswith(pre):
+            key = key[len(pre):]
+    key = key.split("/")[0]
+    if not re.fullmatch(r"[a-z0-9.-]+(:\d{1,5})?|\[[0-9a-f:]+\](:\d{1,5})?", key) or key.split(":")[0] == "localhost":
+        _die(f"not a host name: {a.site}")
+    if a.remove:
+        sites.pop(key, None)
+    else:
+        e = sites.get(key, {})
+        if a.no_approvals:
+            e["approvals"] = False
+        if a.approvals:
+            e.pop("approvals", None)
+        if a.private:
+            e["private"] = True
+        if not (a.no_approvals or a.approvals or a.private):
+            _die("say what to trust: --no-approvals and/or --private (or --remove)")
+        sites[key] = e
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    os.chmod(tmp, 0o644)
+    tmp.replace(f)
+    print(f"saved {f}. Your phone asks once per session before it takes effect.")
+    if _running() and "/run/secrets/trust" not in _docker("inspect", "-f", "{{json .Mounts}}", NAME,
+                                                           check=False).stdout:
+        print("The running vault was started before trusted sites existed: "
+              "`authyouragent vault down` and `vault up` once to pick it up.")
 
 
 def up(a):
@@ -257,6 +330,14 @@ def main(argv=None):
     u.set_defaults(fn=up)
     sub.add_parser("down", help="sign out of every site, then stop").set_defaults(fn=down)
     sub.add_parser("status").set_defaults(fn=status)
+    t = sub.add_parser("trust", help="trusted sites (your exceptions to the vault's rules)",
+                       description=TRUST_HELP, formatter_class=argparse.RawDescriptionHelpFormatter)
+    t.add_argument("site", nargs="?")
+    t.add_argument("--no-approvals", action="store_true", help="clicks on this site stop asking you each time")
+    t.add_argument("--approvals", action="store_true", help="ask before clicks again")
+    t.add_argument("--private", action="store_true", help="allow this host on your own network")
+    t.add_argument("--remove", action="store_true")
+    t.set_defaults(fn=trust_cmd)
     e = sub.add_parser("env", help="print the MCP server env block")
     e.add_argument("--agent-id")
     e.add_argument("--key")

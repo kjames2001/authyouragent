@@ -25,6 +25,7 @@ Environment:
                    VAULT_SIZE so the page lays out as on a phone but stays sharp.
 """
 import asyncio
+import base64
 import json
 import os
 import re
@@ -39,6 +40,7 @@ from playwright.async_api import async_playwright
 
 import bitwarden
 import egress
+import trust
 from authyouragent.agent import AgentClient
 from authyouragent import webbotauth
 from authyouragent.takeover import BLOCKING_JS, login_finished
@@ -86,6 +88,92 @@ READ_JS = r"""(max) => {
   if (all && size < all.length / 4) return all.slice(0, max);
   return out.join('\n');
 }"""
+
+# The things on the page an agent can act on, numbered. Each gets a
+# data-aya-ref attribute (the previous numbering is cleared first), so click,
+# type_text and select_option can take ref=N instead of a guessed selector.
+# Open shadow roots are walked (Reddit, many web components); iframes are not.
+# A password field's value is never reported.
+ELEMENTS_JS = r"""(max) => {
+  const SEL = 'a[href],button,input:not([type=hidden]),select,textarea,summary,[contenteditable=""],[contenteditable=true],' +
+    '[role=button],[role=link],[role=checkbox],[role=radio],[role=tab],[role=menuitem],[role=switch],' +
+    '[role=option],[role=combobox],[role=textbox],[role=searchbox],[tabindex]:not([tabindex="-1"])';
+  const roots = [document], all = [];
+  for (let i = 0; i < roots.length; i++) {
+    for (const el of roots[i].querySelectorAll('*')) {
+      if (el.shadowRoot) roots.push(el.shadowRoot);
+      if (el.hasAttribute('data-aya-ref')) el.removeAttribute('data-aya-ref');
+      if (el.matches(SEL)) all.push(el);
+    }
+  }
+  const text = s => (s || '').replace(/\s+/g, ' ').trim();
+  const vh = innerHeight, out = [];
+  let n = 0;
+  for (let i = 0; i < all.length; i++) {
+    const el = all[i];
+    if (out.length >= max) break;
+    if (el.closest('[aria-hidden=true]') || el.disabled) continue;
+    const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+    if (r.width < 1 || r.height < 1 || cs.visibility === 'hidden' || cs.display === 'none') continue;
+    // a clickable wrapper around one already listed (a <div tabindex> around a button)
+    if (all[i + 1] && el.contains(all[i + 1]) && !/^(A|BUTTON|SELECT|TEXTAREA|INPUT|SUMMARY)$/.test(el.tagName)
+        && !el.getAttribute('role')) continue;
+    const tag = el.tagName.toLowerCase(), type = (el.getAttribute('type') || '').toLowerCase();
+    const role = el.getAttribute('role') || '';
+    let kind = role || tag;
+    if (tag === 'input') kind = 'input[' + (type || 'text') + ']';
+    if (tag === 'a' && !role) kind = 'link';
+    const img = el.querySelector && el.querySelector('img[alt]');
+    const lb = el.getAttribute('aria-labelledby');
+    const byId = lb ? text(lb.split(/\s+/).map(i => (el.getRootNode().getElementById ? el.getRootNode() : document)
+                        .getElementById(i)).filter(Boolean).map(x => x.innerText).join(' ')) : '';
+    const inner = el.querySelector && el.querySelector('[aria-label],[title],svg title');
+    const innerLabel = inner ? text(inner.getAttribute('aria-label') || inner.getAttribute('title') || inner.textContent) : '';
+    let label = text(el.getAttribute('aria-label')) || byId || text(el.innerText).slice(0, 80) ||
+                text(el.getAttribute('title')) || (img ? text(img.alt) : '') || innerLabel || text(el.getAttribute('placeholder'));
+    if (!label && el.labels && el.labels[0]) label = text(el.labels[0].innerText);
+    if (!label && tag === 'input' && /^(submit|button|reset)$/.test(type)) label = text(el.value);
+    const item = {ref: ++n, kind, label: label.slice(0, 80)};
+    if (el.name) item.name = String(el.name).slice(0, 40);
+    if (tag === 'input' && /^(checkbox|radio)$/.test(type)) item.checked = el.checked;
+    else if (tag === 'input' && type !== 'password' && !/^(submit|button|reset|file|image)$/.test(type)) item.value = text(el.value).slice(0, 60);
+    else if (tag === 'textarea') item.value = text(el.value).slice(0, 60);
+    if (tag === 'input' && el.placeholder && el.placeholder !== label) item.placeholder = text(el.placeholder).slice(0, 40);
+    if (tag === 'select') {
+      item.value = el.selectedOptions[0] ? text(el.selectedOptions[0].text) : '';
+      item.options = [...el.options].slice(0, 15).map(o => text(o.text).slice(0, 40));
+      if (el.options.length > 15) item.more_options = el.options.length - 15;
+    }
+    if (tag === 'a') { try { item.href = new URL(el.href).pathname.slice(0, 60); } catch (e) {} }
+    if (r.bottom < 0) item.where = 'above';
+    else if (r.top > vh) item.where = 'below';
+    el.setAttribute('data-aya-ref', String(n));
+    out.push(item);
+  }
+  return {elements: out, total: all.length, scroll: {y: Math.round(scrollY), height: document.documentElement.scrollHeight, view: vh}};
+}"""
+
+
+def _ref_sel(body):
+    """The selector for a request: ref=N from the last read_page, or a selector."""
+    ref = body.get("ref")
+    if ref not in (None, "", 0):
+        try:
+            n = int(ref)
+        except (TypeError, ValueError):
+            raise BadRequest("ref must be a number from read_page")
+        return f'[data-aya-ref="{n}"]'
+    sel = str(body.get("selector") or "")
+    if not sel:
+        raise BadRequest("give ref (a number from read_page) or selector")
+    return sel
+
+
+async def _find(page, sel):
+    if sel.startswith("[data-aya-ref=") and await page.locator(sel).count() == 0:
+        raise BadRequest("that ref is not on the page any more; call read_page again")
+    await page.locator(sel).first.wait_for(timeout=10000)
+
 
 # Sign-out routes for providers whose session is worth ending explicitly.
 # (url to open, selector of a confirm button if the page asks, url that must
@@ -315,6 +403,10 @@ async def _watch_signin(ws, site, blocked_at_start, cookies_at_start):
                 pass                    # the relay may already be closing; the sign-in still finished
             return True
         ok_since = None                 # still a prompt on the page: keep watching
+
+
+class BadRequest(Exception):
+    pass
 
 
 class Busy(Exception):
@@ -719,6 +811,7 @@ class Vault:
             await self.stop_chrome()
             await self.start_chrome()
             self.used, self.hosts, self.origins = False, set(), set()
+            trust.reset()
             _save(SIGNED_IN_FILE, [])
             _log("session ended:", why, report)
             for site, result in report.items():
@@ -796,6 +889,8 @@ async def auth(request, handler):
         return web.json_response({"error": "busy", "detail": str(e)}, status=409)
     except NotApproved as e:
         return web.json_response({"error": "not_approved", "detail": str(e)}, status=403)
+    except BadRequest as e:
+        return web.json_response({"error": "bad_request", "detail": str(e)}, status=400)
     except Exception as e:
         if "ERR_BLOCKED_BY_ADMINISTRATOR" in str(e) or "ERR_TUNNEL_CONNECTION_FAILED" in str(e):
             return web.json_response({"error": "blocked", "detail":
@@ -814,7 +909,8 @@ async def _where(page):
 async def status(request):
     return web.json_response({"attached": bool(V.browser), "in_takeover": V.in_takeover,
                               "session_active": V.used, "lease_s": LEASE_S,
-                              "web_bot_auth": V.wba_agent if V.wba_key else None})
+                              "web_bot_auth": V.wba_agent if V.wba_key else None,
+                              "trusted_sites": trust.entries()})
 
 
 async def ping(request):
@@ -828,6 +924,12 @@ async def navigate(request):
         return web.json_response({"error": "url must start with http:// or https://"}, status=400)
     page = await V.attach()
     V.used = True
+    host, port = _hostport(url)
+    pkey = trust.private_key(host, port)
+    if pkey and not await _trust_ok(page, pkey, "trusted_site:open_on_your_network_this_session",
+                                    site=re.sub(r"[^a-z0-9.-]", "", host) or "private"):
+        return web.json_response({"error": "blocked", "detail":
+            f"blocked by the vault: the owner has not confirmed {pkey} on their phone this session"}, status=403)
     try:
         resp = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
     except Exception as e:
@@ -842,7 +944,8 @@ async def navigate(request):
     if resp is not None and resp.headers.get("x-vault-blocked"):
         await page.goto("about:blank")
         return web.json_response({"error": "blocked", "detail":
-            "blocked by the vault: only public websites can be opened"}, status=403)
+            "blocked by the vault: only public websites, and private hosts the owner trusted, can be opened"},
+            status=403)
     return web.json_response(await _where(page))
 
 
@@ -918,11 +1021,11 @@ def _needs_approval(label, submits_form=False):
     return bool(label) and bool(SENSITIVE.search(label) or any(w.lower() in label.lower() for w in EXTRA))
 
 
-async def _approve(page, label):
+async def _approve(page, label, site=None):
     """Ask the owner, on their phone, to approve `label` on this site. Returns
     approved / denied / expired / cancelled."""
     agent = V.agent()
-    site = _site(urlparse(page.url).hostname)
+    site = site or _site(urlparse(page.url).hostname)
     action = re.sub(r"[^a-z0-9_:-]", "", label.lower().replace(" ", "_"))[:64] or "action"
     r = await asyncio.to_thread(agent.client.post, f"{agent.base}/api/v1/agent-approval", json={
         "agent_id": agent.agent_id, "agent_jwt": agent._agent_jwt(), "site": site, "action": action})
@@ -1029,8 +1132,41 @@ async def _watched(page, label, act):
         await page.unroute("**/*", handler)
 
 
+def _hostport(url):
+    u = urlparse(url)
+    return (u.hostname or "").lower(), u.port or {"https": 443, "http": 80}.get(u.scheme)
+
+
+async def _trust_ok(page, key, what, site=None):
+    """True once the owner has confirmed a trusted-site entry this session.
+    Asks them once; a refusal is remembered until the entry or session changes."""
+    if trust.confirmed(key):
+        return True
+    if trust.declined(key):
+        return False
+    result = await _approve(page, what, site=site)
+    if result == "approved":
+        trust.confirm(key)
+        _log("trusted site confirmed:", key)
+        return True
+    trust.decline(key)
+    return False
+
+
+async def _trusted(page):
+    """Clicks on this site skip per-click approval: the owner listed it with
+    "approvals": false and confirmed that on their phone this session."""
+    host, port = _hostport(page.url)
+    key = trust.approvals_key(host, port, _site(host))
+    # The phone card shows the site plus this action (the cloud keeps [a-z0-9_:-] only)
+    return bool(key) and await _trust_ok(page, key, "trusted_site:no_click_approvals_this_session",
+                                         site=re.sub(r"[^a-z0-9.-]", "", key.split(":")[0]))
+
+
 async def _guarded(page, selector, label_of, act, submits_form):
     """Run `act()` only after the owner approves, if the target commits something."""
+    if await _trusted(page):
+        return await act()
     info = await page.locator(selector).first.evaluate(TARGET_JS)
     label = label_of(info)
     sign_in = info["signIn"] and not re.search(r"change|update|reset|new password", label, re.I)
@@ -1053,8 +1189,8 @@ async def _guarded(page, selector, label_of, act, submits_form):
 async def click(request):
     body = await request.json()
     page = await V.attach()
-    sel = str(body["selector"])
-    await page.locator(sel).first.wait_for(timeout=10000)
+    sel = _ref_sel(body)
+    await _find(page, sel)
     await _guarded(page, sel, lambda i: i["label"],
                    lambda: page.click(sel, timeout=10000),
                    lambda i: i["isSubmit"])
@@ -1065,7 +1201,8 @@ async def click(request):
 async def type_text(request):
     body = await request.json()
     page = await V.attach()
-    sel = str(body["selector"])
+    sel = _ref_sel(body)
+    await _find(page, sel)
     await page.fill(sel, str(body.get("text", "")), timeout=10000)
     if body.get("submit"):
         # Enter submits the field's form: same rule as clicking its submit button
@@ -1078,9 +1215,156 @@ async def type_text(request):
 
 async def read(request):
     n = max(200, min(int(request.query.get("max_chars", 5000)), 20000))
+    m = max(0, min(int(request.query.get("max_elements", 80)), 300))
     page = await V.attach()
     text = await page.evaluate(READ_JS, n)
-    return web.json_response({**await _where(page), "text": text[:n]})
+    out = {**await _where(page), "text": text[:n]}
+    if m:
+        out.update(await page.evaluate(ELEMENTS_JS, m))
+    return web.json_response(out)
+
+
+# Keys an agent may press. Enter and Space can submit or press a button, so
+# they go through the same approval rules as a click on the focused element.
+KEYS = {"Enter", "Space", "Tab", "Shift+Tab", "Escape", "Backspace", "Delete", "ArrowUp", "ArrowDown",
+        "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End"}
+FOCUS_TAG_JS = r"""() => {
+  let e = document.activeElement;
+  while (e && e.shadowRoot && e.shadowRoot.activeElement) e = e.shadowRoot.activeElement;
+  for (const o of document.querySelectorAll('[data-aya-focus]')) o.removeAttribute('data-aya-focus');
+  if (!e || e === document.body || e === document.documentElement) return null;
+  e.setAttribute('data-aya-focus', '1');
+  return {tag: e.tagName, type: (e.getAttribute('type') || 'text').toLowerCase()};
+}"""
+
+
+async def press(request):
+    body = await request.json()
+    key = str(body.get("key", ""))
+    if key not in KEYS:
+        raise BadRequest("key must be one of: " + ", ".join(sorted(KEYS)))
+    page = await V.attach()
+    V.used = True
+    pw_key = " " if key == "Space" else key
+    if body.get("ref") or body.get("selector"):
+        sel = _ref_sel(body)
+        await _find(page, sel)
+        await page.focus(sel, timeout=10000)
+    act = lambda: page.keyboard.press(pw_key)
+    if key in ("Enter", "Space"):
+        f = await page.evaluate(FOCUS_TAG_JS)
+        if f is None:
+            if await _trusted(page):
+                await act()
+            else:
+                await _watched(page, f"press {key}", act)
+        elif key == "Enter" and f["tag"] == "INPUT" and f["type"] not in ("submit", "button", "checkbox", "radio"):
+            await _guarded(page, "[data-aya-focus]", lambda i: i["formSubmit"], act, lambda i: i["inForm"])
+        elif key == "Enter" and f["tag"] == "TEXTAREA":
+            await act()                  # a new line
+        else:
+            await _guarded(page, "[data-aya-focus]", lambda i: i["label"], act, lambda i: i["isSubmit"])
+    else:
+        await act()
+    await asyncio.sleep(0.3)
+    return web.json_response(await _where(page))
+
+
+async def select(request):
+    body = await request.json()
+    option = str(body.get("option", ""))
+    if not option:
+        raise BadRequest("option: the text of the choice, as listed by read_page")
+    page = await V.attach()
+    V.used = True
+    sel = _ref_sel(body)
+    await _find(page, sel)
+    act = lambda: page.select_option(sel, label=option, timeout=10000)
+    # Choosing can submit the form from a script (onchange): watch what it sends.
+    if await _trusted(page):
+        await act()
+    else:
+        await _watched(page, f"choose {option[:40]}", act)
+    await asyncio.sleep(0.3)
+    return web.json_response(await _where(page))
+
+
+SCROLL_JS = r"""(dir) => {
+  const before = scrollY, h = innerHeight;
+  if (dir === 'top') scrollTo(0, 0);
+  else if (dir === 'bottom') scrollTo(0, document.documentElement.scrollHeight);
+  else scrollBy(0, (dir === 'up' ? -1 : 1) * Math.round(h * 0.85));
+  return {moved: Math.round(scrollY - before)};
+}"""
+
+
+async def scroll(request):
+    body = await request.json()
+    page = await V.attach()
+    if body.get("ref") or body.get("selector"):
+        sel = _ref_sel(body)
+        await _find(page, sel)
+        await page.locator(sel).first.scroll_into_view_if_needed(timeout=10000)
+        moved = None
+    else:
+        d = str(body.get("direction", "down"))
+        if d not in ("down", "up", "top", "bottom"):
+            raise BadRequest("direction must be down, up, top or bottom")
+        moved = (await page.evaluate(SCROLL_JS, d))["moved"]
+        await page.mouse.wheel(0, 1 if d in ("down", "bottom") else -1)   # wake lazy loaders
+    await asyncio.sleep(0.6)       # let infinite lists load
+    pos = await page.evaluate("() => ({y: Math.round(scrollY), height: document.documentElement.scrollHeight, "
+                              "view: innerHeight})")
+    return web.json_response({**await _where(page), "moved": moved, "scroll": pos,
+                              "at_end": pos["y"] + pos["view"] >= pos["height"] - 2})
+
+
+async def back(request):
+    page = await V.attach()
+    # go_back's response is None both when there is no history and when Chrome
+    # restores the page from its back/forward cache, so compare the history
+    # position instead.
+    # A page restored from that cache never fires domcontentloaded, so wait
+    # only for the navigation to commit, then give a fresh load a moment.
+    before = await page.evaluate("() => location.href")
+    await page.go_back(wait_until="commit", timeout=30000)
+    try:
+        await page.wait_for_load_state("domcontentloaded", timeout=10000)
+    except Exception:
+        pass
+    after = await page.evaluate("() => location.href")
+    return web.json_response({**await _where(page), "moved": after != before})
+
+
+async def wait_for(request):
+    body = await request.json()
+    secs = max(1, min(float(body.get("seconds", 10)), 30))
+    page = await V.attach()
+    want = str(body.get("text") or "")
+    try:
+        if want:
+            await page.get_by_text(want).first.wait_for(state="visible", timeout=secs * 1000)
+        elif body.get("selector"):
+            await page.locator(str(body["selector"])).first.wait_for(state="visible", timeout=secs * 1000)
+        elif body.get("gone"):
+            await page.get_by_text(str(body["gone"])).first.wait_for(state="hidden", timeout=secs * 1000)
+        else:
+            await page.wait_for_load_state("networkidle", timeout=secs * 1000)
+        found = True
+    except Exception as e:
+        if "Timeout" not in type(e).__name__ and "imeout" not in str(e):
+            raise
+        found = False
+    return web.json_response({**await _where(page), "found": found})
+
+
+async def screenshot(request):
+    page = await V.attach()
+    full = request.query.get("full") == "1"
+    img = await page.screenshot(type="jpeg", quality=60, full_page=full, timeout=15000)
+    if full and len(img) > 1_500_000:
+        img = await page.screenshot(type="jpeg", quality=40, full_page=False, timeout=15000)
+    return web.json_response({**await _where(page), "jpeg_b64": base64.b64encode(img).decode()})
 
 
 # ── Stored secrets (the owner's Bitwarden / Vaultwarden) ──
@@ -1131,11 +1415,12 @@ async def list_secrets(request):
 
 async def fill_secret(request):
     body = await request.json()
-    name, field, sel = str(body.get("name", "")), str(body.get("field", "password")), str(body["selector"])
+    name, field, sel = str(body.get("name", "")), str(body.get("field", "password")), _ref_sel(body)
     if field not in ("username", "password", "totp"):
         return web.json_response({"error": "secrets", "detail": "field must be username, password or totp"}, status=400)
     page = await V.attach()
     V.used = True
+    await _find(page, sel)
     el = await page.locator(sel).first.element_handle(timeout=10000)
     f = await el.evaluate(FIELD_JS)
     if f["origin"] != f"{urlparse(page.url).scheme}://{urlparse(page.url).netloc}":
@@ -1291,6 +1576,8 @@ def main():
         web.get("/secrets", list_secrets), web.post("/fill_secret", fill_secret),
         web.post("/takeover", start_takeover), web.get("/takeover/{jid}", wait_takeover),
         web.post("/end_session", end_session),
+        web.post("/press", press), web.post("/select", select), web.post("/scroll", scroll),
+        web.post("/back", back), web.post("/wait", wait_for), web.get("/screenshot", screenshot),
     ])
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)

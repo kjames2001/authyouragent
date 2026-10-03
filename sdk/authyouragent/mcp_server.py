@@ -20,9 +20,10 @@ Environment:
   AYA_VAULT_AUTOSTART   default 1: start the local vault (Docker) on first use if
                         it is not running. Set 0 to manage it with `authyouragent vault`.
 
-Tools: navigate, click, type_text, read_page, check_login_wall, list_secrets,
-       fill_secret, request_takeover, wait_for_takeover, request_approval,
-       end_session, check_agent_status, report_site.
+Tools: navigate, read_page, click, type_text, press_key, select_option, scroll,
+       go_back, wait_for, screenshot, check_login_wall, list_secrets, fill_secret,
+       request_takeover, wait_for_takeover, request_approval, end_session,
+       check_agent_status, report_site.
 
 The vault ends the session by itself (real sign-out, then the browser profile is
 destroyed) if this server stops sending heartbeats or the owner revokes the agent.
@@ -39,8 +40,9 @@ import httpx
 
 try:                        # mcp 2.x
     from mcp.server.mcpserver import MCPServer as FastMCP, Context
+    from mcp.server.mcpserver import Image
 except ImportError:         # mcp 1.x
-    from mcp.server.fastmcp import FastMCP, Context
+    from mcp.server.fastmcp import FastMCP, Context, Image
 
 from .agent import AgentClient
 
@@ -178,6 +180,49 @@ def _err(e):
     return f"error: {e}"
 
 
+def _target(ref, selector):
+    if ref:
+        return {"ref": ref}
+    if selector:
+        return {"selector": selector}
+    raise RuntimeError("give ref (a number from read_page) or selector")
+
+
+def _what(ref, selector):
+    return f"[{ref}]" if ref else selector
+
+
+def _elements(d):
+    lines = []
+    for e in d.get("elements", []):
+        bits = [f"[{e['ref']}] {e['kind']}"]
+        if e.get("label"):
+            bits.append(f'"{e["label"]}"')
+        if e.get("name"):
+            bits.append(f"name={e['name']}")
+        if "checked" in e:
+            bits.append("checked" if e["checked"] else "unchecked")
+        if e.get("value"):
+            bits.append(f'value="{e["value"]}"')
+        if e.get("placeholder"):
+            bits.append(f'placeholder="{e["placeholder"]}"')
+        if e.get("options"):
+            more = f" +{e['more_options']} more" if e.get("more_options") else ""
+            bits.append("options: " + " | ".join(e["options"]) + more)
+        if e.get("href"):
+            bits.append(f"-> {e['href']}")
+        if e.get("where"):
+            bits.append(f"({e['where']})")
+        lines.append(" ".join(bits))
+    if not lines:
+        return ""
+    sc = d.get("scroll") or {}
+    tail = ""
+    if sc and sc.get("height", 0) > sc.get("y", 0) + sc.get("view", 0) + 2:
+        tail = "\n(more of the page is below: scroll to see it)"
+    return "\n\nYou can act on (use the number as ref):\n" + "\n".join(lines) + tail
+
+
 # ─── Browser tools ────────────────────────────────────────────────────────
 
 @mcp.tool()
@@ -195,31 +240,118 @@ async def navigate(url: str) -> str:
 
 
 @mcp.tool()
-async def click(selector: str) -> str:
+async def click(ref: int = 0, selector: str = "") -> str:
     """Click an element on the current page and return the page's URL and title
     afterwards. If the click would commit something (it submits a form, or the
     button says create, send, save, delete, pay and the like), the vault first asks
     the owner to approve it on their phone and waits up to about five minutes; a
     denial returns an error and nothing is clicked. Sign-in and search forms are
     not interrupted.
-    selector: a CSS or Playwright selector, e.g. "button[type=submit]" or "text=Add Server"."""
+    ref: the element's number from read_page (preferred).
+    selector: or a CSS / Playwright selector, e.g. "button[type=submit]" or "text=Add Server"."""
     try:
-        return f"clicked: {selector}\npage: {_where(await _call('POST', '/click', json={'selector': selector}))}"
+        d = await _call('POST', '/click', json=_target(ref, selector))
+        return f"clicked: {_what(ref, selector)}\npage: {_where(d)}"
     except Exception as e:
         return _err(e)
 
 
 @mcp.tool()
-async def type_text(selector: str, text: str, submit: bool = False) -> str:
+async def type_text(text: str, ref: int = 0, selector: str = "", submit: bool = False) -> str:
     """Type into a form field (replaces its value). Never use this for the owner's
     passwords or codes: use fill_secret if the owner saved the sign-in, otherwise
     ask for a take over.
-    selector: the field, e.g. "input[name=url]".
     text: what to type.
-    submit: press Enter afterwards."""
+    ref: the field's number from read_page (preferred).
+    selector: or a CSS selector, e.g. "input[name=url]".
+    submit: press Enter afterwards (asks the owner first if that submits a form)."""
     try:
-        d = await _call('POST', '/type', json={'selector': selector, 'text': text, 'submit': submit})
-        return f"typed into: {selector}\npage: {_where(d)}"
+        d = await _call('POST', '/type', json={**_target(ref, selector), 'text': text, 'submit': submit})
+        return f"typed into: {_what(ref, selector)}\npage: {_where(d)}"
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool()
+async def press_key(key: str, ref: int = 0, selector: str = "") -> str:
+    """Press a key in the page: Enter, Space, Tab, Shift+Tab, Escape, Backspace,
+    Delete, ArrowUp/Down/Left/Right, PageUp, PageDown, Home, End. Escape closes
+    pop-ups; arrows move through menus and lists. Enter or Space on something that
+    submits or commits follows the same approval rules as a click.
+    ref / selector: focus this element first (optional; otherwise the key goes to
+    whatever has focus)."""
+    try:
+        body = {"key": key}
+        if ref or selector:
+            body.update(_target(ref, selector))
+        d = await _call('POST', '/press', json=body)
+        return f"pressed: {key}\npage: {_where(d)}"
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool()
+async def select_option(option: str, ref: int = 0, selector: str = "") -> str:
+    """Choose an entry in a dropdown (<select>). read_page lists each dropdown's
+    options. If choosing makes the page send data to the site, the owner is asked first.
+    option: the visible text of the choice, e.g. "United Kingdom".
+    ref: the dropdown's number from read_page (preferred), or selector."""
+    try:
+        d = await _call('POST', '/select', json={**_target(ref, selector), 'option': option})
+        return f"chose: {option}\npage: {_where(d)}"
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool()
+async def scroll(direction: str = "down", ref: int = 0) -> str:
+    """Scroll the page, to read further or to load more (endless lists).
+    direction: down or up (most of a screen), top or bottom.
+    ref: or bring that element from read_page into view.
+    Call read_page afterwards: element numbers are renumbered on every read."""
+    try:
+        d = await _call('POST', '/scroll', json={"ref": ref} if ref else {"direction": direction})
+        sc = d.get("scroll") or {}
+        end = " (end of page)" if d.get("at_end") else ""
+        return f"scrolled to {sc.get('y', '?')} of {sc.get('height', '?')}px{end}\npage: {_where(d)}"
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool()
+async def go_back() -> str:
+    """Go back to the previous page, like the browser's Back button."""
+    try:
+        d = await _call('POST', '/back', json={})
+        return f"page: {_where(d)}" if d.get("moved") else f"no previous page\npage: {_where(d)}"
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool()
+async def wait_for(text: str = "", gone: str = "", seconds: float = 10) -> str:
+    """Wait for the page to change, instead of guessing with sleeps.
+    text: wait until this text is visible (e.g. "Order placed").
+    gone: or wait until this text disappears (e.g. "Loading").
+    Neither: wait until the page stops loading.
+    seconds: at most this long, 1 to 30."""
+    try:
+        d = await _call('POST', '/wait', json={"text": text, "gone": gone, "seconds": seconds})
+        return f"{'found' if d.get('found') else 'not found within the time'}\npage: {_where(d)}"
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool()
+async def screenshot(full_page: bool = False):
+    """A picture of what the browser shows (JPEG), for when the text is not
+    enough: charts, images, layouts, a page that reads oddly. read_page is
+    cheaper; use this when you need to see.
+    full_page: the whole page instead of the visible part."""
+    import base64
+    try:
+        d = await _call('GET', '/screenshot', params={"full": "1" if full_page else "0"})
+        return Image(data=base64.b64decode(d["jpeg_b64"]), format="jpeg")
     except Exception as e:
         return _err(e)
 
@@ -240,31 +372,34 @@ async def list_secrets() -> str:
 
 
 @mcp.tool()
-async def fill_secret(selector: str, name: str, field: str = "password") -> str:
+async def fill_secret(name: str, field: str = "password", ref: int = 0, selector: str = "") -> str:
     """Fill a field from the owner's password manager. The vault types the value
     itself; you never see it. It only fills on a site saved with the item, and
     only the right kind of field: a password into a password field, a totp code
     into a one-time code field, a username into a text or email field. Then
     click the sign-in button as usual.
-    selector: the field, e.g. "input[type=password]".
     name: the item name from list_secrets.
-    field: username, password or totp."""
+    field: username, password or totp.
+    ref: the field's number from read_page (preferred), or selector, e.g. "input[type=password]"."""
     try:
-        d = await _call('POST', '/fill_secret', json={'selector': selector, 'name': name, 'field': field})
-        return f"filled {field} of '{name}' into: {selector}\npage: {_where(d)}"
+        d = await _call('POST', '/fill_secret', json={**_target(ref, selector), 'name': name, 'field': field})
+        return f"filled {field} of '{name}' into: {_what(ref, selector)}\npage: {_where(d)}"
     except Exception as e:
         return _err(e)
 
 
 @mcp.tool()
-async def read_page(max_chars: int = 5000) -> str:
-    """Read the current page: its URL, title and visible text, in reading order.
-    Use it after navigate or click to see what is on screen (no screenshot needed).
-    Text in form fields and hidden elements is not included.
-    max_chars: how much text to return, 200 to 20000 (default 5000)."""
+async def read_page(max_chars: int = 5000, max_elements: int = 80) -> str:
+    """Read the current page: its URL, title, visible text in reading order, and a
+    numbered list of what you can act on (links, buttons, fields, dropdowns with
+    their options). Pass a number as `ref` to click, type_text, select_option,
+    press_key or fill_secret. Numbers change on every read_page: read again after
+    the page changes.
+    max_chars: how much text to return, 200 to 20000 (default 5000).
+    max_elements: how many elements to list, 0 to 300 (default 80)."""
     try:
-        d = await _call('GET', '/read', params={'max_chars': max_chars})
-        return f"url: {d['url']}\ntitle: {d['title']}\n\n{d['text']}"
+        d = await _call('GET', '/read', params={'max_chars': max_chars, 'max_elements': max_elements})
+        return f"url: {d['url']}\ntitle: {d['title']}\n\n{d['text']}{_elements(d)}"
     except Exception as e:
         return _err(e)
 

@@ -35,14 +35,16 @@ The vault needs Docker. `vault up` starts it on `127.0.0.1:7801` with every prot
 
 `AYA_AGENT_ID` and the key come from adding the agent in the app (**Agents → Add an agent**). Node-based clients can use `npx authyouragent-mcp` instead of `authyouragent-mcp`.
 
-The agent gets thirteen tools:
+The agent gets nineteen tools:
 
 | Tool | Purpose |
 |---|---|
-| `navigate`, `click`, `type_text`, `read_page` | Drive the vault's browser. Only public websites open. Clicks that commit something wait for the owner's approval. |
+| `navigate`, `read_page` | Open a page; read its text plus a numbered list of the links, buttons, fields, dropdowns and checkboxes on it (password values never shown). |
+| `click`, `type_text`, `select_option`, `press_key` | Act on an element by its number from `read_page` (`ref`), or by CSS `selector`. Anything that commits something waits for the owner's approval. |
+| `scroll`, `go_back`, `wait_for`, `screenshot` | Scroll (and load more on endless pages), go back, wait for text to appear or disappear, see the page as a JPEG. |
 | `check_login_wall` | Is the page asking for a password, a CAPTCHA, a code or a sign-in approval? |
 | `list_secrets` | The sign-ins the owner has shared from their password manager: names, sites and fields, never values. |
-| `fill_secret(selector, name, field)` | Type a username, password or authenticator code from the owner's password manager into a field. The agent never sees the value. See [Saved sign-ins](#saved-sign-ins). |
+| `fill_secret(name, field, ref)` | Type a username, password or authenticator code from the owner's password manager into a field. The agent never sees the value. See [Saved sign-ins](#saved-sign-ins). |
 | `request_takeover(reason)` | Ask the owner to take over. Returns `done`, `cancelled`, `expired` or `incomplete` with a line saying what to do next, or `waiting` with a `takeover_id` after `wait_seconds` (default 240). |
 | `wait_for_takeover(takeover_id)` | Keep waiting after `waiting`. |
 | `request_approval(site, action)` | Ask the owner to approve an action. `approved`, `denied` or `expired`. |
@@ -50,15 +52,32 @@ The agent gets thirteen tools:
 | `check_agent_status` | `active` or `revoked`. |
 | `report_site` | Report a site where take over did not work. |
 
-The tools answer in plain text and read the page's fields and text, not screenshots, so the model driving your agent does not need vision.
+The tools answer in plain text and read the page's fields and text, so the model driving your agent does not need vision; `screenshot` is there for models that have it.
 
 What the vault enforces, whatever the agent does:
 
-- **Step-up approval.** A click (or Enter) that submits a form, or on a button that says create, send, save, delete, pay, publish and the like, first asks the owner on their phone, showing the button's words. Any other click that makes the page write to the site within 2 seconds (a scripted POST, PUT, PATCH, DELETE or GraphQL mutation) is held until the owner approves. Search boxes and sign-in steps are not interrupted; "Authorize" and "Allow" on a sign-in page still ask. Add words with `VAULT_APPROVE_WORDS`.
-- **Public internet only.** Loopback, private networks, cloud metadata addresses and the vault's own ports are refused, checked on the resolved address.
+- **Step-up approval.** A click (or Enter, or Space) that submits a form, or on a button that says create, send, save, delete, pay, publish and the like, first asks the owner on their phone, showing the button's words. Any other click that makes the page write to the site within 2 seconds (a scripted POST, PUT, PATCH, DELETE or GraphQL mutation) is held until the owner approves. Search boxes and sign-in steps are not interrupted; "Authorize" and "Allow" on a sign-in page still ask. Add words with `VAULT_APPROVE_WORDS`.
+- **Public internet only**, unless the owner trusts a host (below). Loopback, private networks, cloud metadata addresses and the vault's own ports are refused, checked on the resolved address.
+- **Trusted sites are the owner's exceptions, never the agent's.** See [Trusted sites](#trusted-sites).
 - **No internal browser pages**, `file://`, extensions, downloads or saved passwords.
 - **Chromium's sandbox on**, all container capabilities dropped; under gVisor automatically when Docker has the `runsc` runtime.
 - **Sign out first, wipe second.** At the end of a session, and when the agent stops sending heartbeats or is revoked, the vault signs out of each site, confirms it where it can, then destroys the in-memory profile. Sites it could not sign out of are reported to the owner, also after a crash.
+
+## Trusted sites
+
+The vault's rules suit most sites. For a site the owner uses all the time, or a service on their own network, they can relax them:
+
+```bash
+authyouragent vault trust example.com --no-approvals     # clicks on example.com stop asking each time
+authyouragent vault trust 192.168.1.20:8123 --private    # the browser may open this host on your own network
+authyouragent vault trust                                # list
+authyouragent vault trust example.com --remove
+```
+
+- **Confirmed on the phone.** An entry does nothing until the owner approves it on their phone, once per session (until `end_session`). A changed entry asks again; a refused one is not asked again that session. An agent that writes to the file cannot use it on its own.
+- **`--no-approvals`** covers the site and its subdomains. Saved passwords stay hidden from the agent; `read_page` still never shows password values.
+- **`--private`** is one exact host and port, and only private ranges: 10/8, 172.16/12, 192.168/16, 100.64/10 (Tailscale) and IPv6 ULA. Loopback, link-local (cloud metadata) and the vault's own addresses stay blocked whatever the file says.
+- The file is `~/.authyouragent/vault/trust/trusted.json`, mounted read-only into the vault. A vault started before 0.3.17 needs one `vault down` and `vault up` to see it.
 
 ## Saved sign-ins
 

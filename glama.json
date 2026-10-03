@@ -31,15 +31,39 @@
     },
     {
       "name": "click",
-      "description": "Click an element. Clicks that submit, send, delete, pay or publish ask the owner's phone first."
+      "description": "Click an element by its number from read_page (or a CSS selector). Clicks that submit, send, delete, pay or publish ask the owner's phone first."
     },
     {
       "name": "type_text",
       "description": "Type into a form field. Never used for the owner's passwords or codes."
     },
     {
+      "name": "select_option",
+      "description": "Choose an entry in a dropdown by its visible text. Asks the owner first if choosing sends data to the site."
+    },
+    {
+      "name": "press_key",
+      "description": "Press Enter, Space, Tab, Escape, arrows and the like. Enter or Space that submits or commits asks the owner first."
+    },
+    {
+      "name": "scroll",
+      "description": "Scroll down, up, to the top or bottom, or to an element; loads more on endless pages."
+    },
+    {
+      "name": "go_back",
+      "description": "Go back to the previous page."
+    },
+    {
+      "name": "wait_for",
+      "description": "Wait until some text appears or disappears, or the page stops loading."
+    },
+    {
+      "name": "screenshot",
+      "description": "A JPEG of what the browser shows, for models with vision."
+    },
+    {
       "name": "read_page",
-      "description": "Read the page's URL, title and visible text (no screenshot needed)."
+      "description": "Read the page: URL, title, visible text, and a numbered list of links, buttons, fields and dropdowns to act on. Password values are never shown."
     },
     {
       "name": "check_login_wall",
