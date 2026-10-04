@@ -64,6 +64,16 @@ What the vault enforces, whatever the agent does:
 - **Chromium's sandbox on**, all container capabilities dropped; under gVisor automatically when Docker has the `runsc` runtime.
 - **Sign out first, wipe second.** At the end of a session, and when the agent stops sending heartbeats or is revoked, the vault signs out of each site, confirms it where it can, then destroys the in-memory profile. Sites it could not sign out of are reported to the owner, also after a crash.
 
+### Where to run the vault
+
+The rules above hold only while the agent cannot reach the vault from outside its tools.
+
+- **The agent drives the vault through its tools, and nothing else.** An agent with a shell on the machine or user account that runs the vault can read the agent key, call the vault's local API directly, or open a shell in the vault's container. Then it can ask the cloud for approvals the vault never saw, and put an amount or item of its choice on the card.
+- **Where the card's words come from.** For a click in the vault, the vault reads them from the page: the button's own words, and the amount, item and order from that button's form. With `request_approval` or `authyouragent approve`, the agent writes them itself: a site and a short action label, nothing more. For a site's own request (CIBA), the site writes them.
+- **So run the vault where the agent has no shell.** Either a separate machine, VM or container from the one the agent's code runs in, or at least a separate user account, with the agent key readable only by the vault. Coding agents with a terminal tool on the same machine do not meet this; agents that only have MCP tools do.
+
+No code inside the vault can replace this boundary.
+
 ## Approval modes
 
 Every click that commits something (buy, post, delete, submit a form) waits for the owner's approval on their phone. The owner chooses, per agent and per site, how often that happens. In the app: **Agents → Approvals**.
