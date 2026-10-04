@@ -142,7 +142,7 @@ pytest 2>&1 | tail -5 | authyouragent notify -      # '-' reads the text from st
 | `1` | recorded in the person's Activity, but no device has notifications on |
 | `2` | could not send: missing or wrong key, agent revoked, server unreachable, empty text |
 
-Text is plain, up to 600 characters and 12 lines. An agent can send 20 notes an hour. Each note is also kept in the person's Activity log.
+Text is plain, up to 600 characters and 12 lines. An agent can send 20 notes an hour. Each note is also kept in the person's Activity log and in the app's Notifications list (the bell), where it can be read again for 30 days.
 
 When the agent drives the browser vault, the vault sends its own summary when the session ends: the sites used, what the person approved, denied or left unanswered, what went through by their approval mode, and whether each sign-out was confirmed. The vault writes it from what it saw and decided, so it arrives even if the agent crashed or never sent a note; in that case it says the agent stopped without ending the session. The person can turn these summaries off in the app (Security → Notify me when a vault session ends); notes the agent sends on purpose always arrive.
 

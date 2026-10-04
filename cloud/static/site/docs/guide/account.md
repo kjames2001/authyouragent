@@ -26,6 +26,14 @@ Passkeys are listed separately from notification devices. Removing a device does
 
 The **Activity** tab shows everything that happened on your account, newest first: sign-ins, approvals, denials, revocations, new agents and new devices. You can filter it by agent or by site, and **Show older** loads more.
 
+## Notifications
+
+The bell at the top of the app lists every notification sent to your phone in the last 30 days, in full, including ones you dismissed or tapped away by mistake. A number on the bell counts the ones you have not seen; opening the list clears it.
+
+Each approval request shows what became of it: approved, denied, expired, or **waiting for you** with an **Open** button that takes you to the card. Tapping a notification on your phone opens the app at that entry.
+
+The list is deleted with your account and is included when you download your data.
+
 Each entry shows the time, what happened, and the network address it came from where that applies.
 
 ## Download your data

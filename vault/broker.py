@@ -1227,6 +1227,9 @@ async def _approve(page, label, site=None, details=None):
     cloud may approve at once, without asking (rules only, no AI)."""
     agent = V.agent()
     site = site or _site(urlparse(page.url).hostname)
+    # always send the page's own address, so the card and the owner's
+    # notification list say demo.example.com, not example.com
+    details = {**(details or {}), "host": (urlparse(page.url).hostname or "").lower()}
     action = re.sub(r"[^a-z0-9_:-]", "", label.lower().replace(" ", "_"))[:64] or "action"
     body = {"agent_id": agent.agent_id, "agent_jwt": agent._agent_jwt(), "site": site, "action": action}
     if details:
@@ -1237,9 +1240,12 @@ async def _approve(page, label, site=None, details=None):
     j = r.json()
     txn = j["txn_id"]
     shown = (details or {}).get("amount", "")
+    # the summary names the address the owner saw, not the parent domain
+    # the approval is filed under (demo.example.com, not example.com)
+    host = (urlparse(page.url).hostname or "").removeprefix("www.") or site
     if j.get("auto"):
         _log("approved by the owner's approval mode:", site, action, j.get("why", ""))
-        V.note("auto", site, label, shown)
+        V.note("auto", host, label, shown)
         return "approved"
     _log("approval requested:", site, action, txn)
     deadline = time.time() + APPROVAL_WAIT
@@ -1253,9 +1259,9 @@ async def _approve(page, label, site=None, details=None):
             st = None
         if st in ("approved", "denied", "expired", "cancelled"):
             _log("approval", st, action)
-            V.note("expired" if st == "cancelled" else st, site, label, shown)
+            V.note("expired" if st == "cancelled" else st, host, label, shown)
             return st
-    V.note("expired", site, label, shown)
+    V.note("expired", host, label, shown)
     return "expired"
 
 
@@ -1486,7 +1492,8 @@ async def _guarded(page, selector, label_of, act, submits_form):
                            "unknown": not ok, "read": False}
         if not ok:
             _log("money click result unknown:", site, label)
-            V.note("unknown", site, label, details.get("amount", ""))
+            V.note("unknown", (urlparse(page.url).hostname or site).removeprefix("www."), label,
+                   details.get("amount", ""))
             raise ResultUnknown(
                 f"'{label}'{' ' + details['amount'] if details.get('amount') else ''} was clicked, but {site} "
                 f"did not answer within {ANSWER_WAIT} s: it may or may not have gone through. Do NOT click it "
@@ -1824,7 +1831,7 @@ async def _after_takeover(job, agent, site, result):
     job["final"] = page.url
     if result == "done" and not await login_finished(page):
         result = "incomplete"
-    V.note("takeover", _site(site), result)
+    V.note("takeover", (site or "").removeprefix("www."), result)
     await asyncio.to_thread(agent.report_status, f"takeover_{result}", site)
     return result
 
