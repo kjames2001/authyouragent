@@ -6,6 +6,10 @@ Every release of the Python SDK, MCP server and browser vault (`authyouragent` o
 
 **Website**
 - Web Bot Auth: agent key lists are now served with `Cache-Control: max-age=300` (was 3600), so after an owner revokes an agent, verifiers stop accepting its signatures within five minutes instead of an hour.
+- Approval cards: a site's signed step-up text is refused if it holds invisible characters (right-to-left overrides, bidi isolates, zero-width characters, Unicode line or paragraph separators, other control or format characters), so the text the owner approves always reads as it was signed; before, only ASCII control characters were refused. The same characters are removed from what the vault reads off a page (button wording, amount, item, order, page title) and from `notify_owner` notes, where Unicode line separators become ordinary line breaks.
+- Agent-readiness check: malformed input such as `http://[` or `http://[1.1.1.1]` now gets the "Enter a domain name" message instead of a server error, and a redirect or link with a malformed address (bad port, unclosed bracket) is treated as unreachable instead of ending the check with an error.
+- Private-network guard (readiness check and plugin back-channel logout): IPv6 addresses that carry an IPv4 address (NAT64 `64:ff9b::/96`, IPv4-compatible `::a.b.c.d`, IPv4-mapped, 6to4) are judged by the IPv4 address inside, so `64:ff9b::7f00:1` (127.0.0.1) is refused. Python's own check counts some of these as public. Not reachable on the current host, which has no IPv6 route.
+- Found by new property-based tests (Hypothesis): eleven rules covering approval modes, the readiness check's input and address guards, card and note text, and site-signed step-up requests, each tried against up to 3,000 generated inputs.
 
 ## 0.3.24 (2026-10-04)
 
