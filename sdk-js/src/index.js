@@ -8,7 +8,7 @@
 // Docs: https://authyouragent.com/docs/developers/quickstart
 
 export const DEFAULT_CLOUD = "https://authyouragent.com";
-export const VERSION = "0.3.1";
+export const VERSION = "0.3.23";
 
 const subtle = globalThis.crypto && globalThis.crypto.subtle;
 if (!subtle) throw new Error("authyouragent: Web Crypto (crypto.subtle) is not available in this runtime");
@@ -243,9 +243,11 @@ export class AgentClient {
     try { return await p; } finally { this._inflight.delete(site); }
   }
 
-  async _stepup(site, action) {
-    const r = await this._post("/api/v1/stepup",
-      { agent_id: this.agentId, site, action, agent_jwt: await this._agentJwt() });
+  async _stepup(site, action, stepupRequest) {
+    const body = { agent_id: this.agentId, site, action, agent_jwt: await this._agentJwt() };
+    // the site's own signed description of the action, passed through unchanged
+    if (typeof stepupRequest === "string") body.stepup_request = stepupRequest;
+    const r = await this._post("/api/v1/stepup", body);
     if (r.status >= 400) return null;
     try { return (await this._waitFor(r.data.txn_id, { stepup: true })).stepup_token; }
     catch (_) { return null; }
@@ -276,7 +278,8 @@ export class AgentClient {
     const body = await res.clone().json().catch(() => null);
     const err = body && (body.error || (body.detail && body.detail.error));
     if (err !== "stepup_required") return res;
-    const st = await this._stepup(site, stepupAction);
+    const eo = body.error ? body : body.detail;
+    const st = await this._stepup(site, stepupAction, eo && eo.stepup_request);
     if (!st) return res;
     return send({ "x-authyouragent-stepup": st });
   }

@@ -338,7 +338,11 @@ class AgentClient:
                 return resp          # not a step-up signal; surface as-is
             err_obj = body.get("detail") if isinstance(body.get("detail"), dict) else body
             if err_obj.get("error") == "stepup_required":
-                st = self._stepup(site, stepup_action)
+                # a site that describes the action itself sends a signed
+                # stepup_request: pass it through unchanged (the owner sees
+                # the site's words, and the cloud checks the signature)
+                sr = err_obj.get("stepup_request")
+                st = self._stepup(site, stepup_action, sr if isinstance(sr, str) else None)
                 if st:
                     # retry: fresh token (the old one may have expired
                     # during the phone wait) + fresh DPoP proof bound to it
@@ -440,11 +444,13 @@ class AgentClient:
             raise AgentError(f"note returned {r.status_code}: {r.text[:200]}")
         return bool(r.json().get("sent"))
 
-    def _stepup(self, site, action):
+    def _stepup(self, site, action, stepup_request=None):
+        body = {"agent_id": self.agent_id, "site": site, "action": action,
+                "agent_jwt": self._agent_jwt()}
+        if stepup_request:
+            body["stepup_request"] = stepup_request
         try:
-            r = self.client.post(f"{self.base}/api/v1/stepup", json={
-                "agent_id": self.agent_id, "site": site, "action": action,
-                "agent_jwt": self._agent_jwt()})
+            r = self.client.post(f"{self.base}/api/v1/stepup", json=body)
         except httpx.HTTPError as e:
             print(f"[authyouragent] stepup request failed: {e}")
             return None

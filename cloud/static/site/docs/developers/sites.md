@@ -316,6 +316,42 @@ The Python agent SDK recognises `{"error": "stepup_required"}` (bare, or inside 
 
 **Do cheap checks before `verify()`.** A step-up approval is used up the moment `verify()` accepts it. If you then reject the request for another reason, such as a missing record, the person has to approve again.
 
+### Describe the action in your own words (recommended)
+
+With the body above, the person's phone shows the agent's name for the action: *wants to apply on jobs.example.com*. It says nothing about which job, and the agent chose the word.
+
+Instead, describe the action yourself and sign it. The phone then shows **your** text, marked as signed by your site, and the approval comes back tied to your reference, so you can check that it was for this request and not another one:
+
+```python
+from authyouragent.site import StepupSigner
+
+signer = StepupSigner(site="jobs.example.com", cloud="https://authyouragent.com",
+                      key_file="/etc/jobs/stepup-key.pem")
+
+@app.get("/.well-known/authyouragent-site-keys.json")
+def site_keys():
+    return signer.jwks()
+
+@app.post("/api/jobs/{job_id}/apply")
+def apply(job_id: str, request: Request):
+    job = JOBS_BY_ID.get(job_id)
+    if not job:
+        raise HTTPException(404, {"error": "no such job"})
+    auth = verifier.verify(request)
+    if not auth.stepup or auth.stepup_ref != job_id:
+        raise HTTPException(403, signer.required(
+            auth.agent_id, "apply", f"Apply to {job.title} at {job.org}", ref=job_id))
+    ...
+```
+
+- **The key** is your site's own EC P-256 key, used for nothing else. Make one with `StepupSigner.new_key()` and keep it on your server. Publish the public half at `https://<your site>/.well-known/authyouragent-site-keys.json`; the cloud fetches it from there (https, no redirects) and caches it for 5 minutes. To rotate, publish the new key next to the old one, switch, then remove the old one.
+- **The text** is one line, at most 120 characters. Write what the person is agreeing to, with the facts that matter: the job, the amount, the order.
+- **The signed request** names the agent, the action and your site, and lasts 5 minutes (at most 10). The agent passes it to the cloud unchanged; the SDKs do this. It cannot reuse it for another agent, another action or another site, and it cannot change the text.
+- **`auth.stepup_ref`** is the `ref` you signed, returned once the person approves. Compare it with the request you are serving. An approval in the agent's own words, or for another job, has a different or empty `ref` and is refused.
+- **The step-up stays one-time and tied to the action**, as before.
+
+Sites that do not sign keep working: the card then says the words are the agent's.
+
 ## Asking for information about the person
 
 An agent can request fields such as the person's name when it asks for access (`user_info=["user:name"]` in the access request). The person sees them on the approval card. If approved, the values arrive in `auth.user_info` on every request. The person can remove fields later; you then stop receiving them within 10 minutes.

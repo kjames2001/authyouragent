@@ -101,7 +101,9 @@ Ask the person to approve one sensitive action.
  "agent_jwt": "<agent JWT>"}
 ```
 
-→ `{"txn_id": "t_…", "expires_in": 300}`. Then poll `GET /api/v1/authz-requests/{txn_id}` with `X-Agent-JWT`. Requires approved access to the site (`403` otherwise).
+→ `{"txn_id": "t_…", "expires_in": 300, "site_signed": false}`. Then poll `GET /api/v1/authz-requests/{txn_id}` with `X-Agent-JWT`. Requires approved access to the site (`403` otherwise).
+
+If the site's `403 stepup_required` answer included a `stepup_request`, send it unchanged as `"stepup_request"`. The person then sees the site's own description of the action, and `site_signed` is `true`. A request that fails the site's signature, or was issued for another agent, action or site, is refused with `400` and nothing reaches the phone. See [Describe the action in your own words](/docs/developers/sites#describe-the-action-in-your-own-words-recommended).
 
 ## Site endpoints
 
@@ -118,8 +120,10 @@ Check an incoming agent request (cloud mode). Consumes the step-up token if one 
 ```json
 {"valid": true, "agent_id": "ag_…", "agent_name": "Job-search assistant",
  "user_id": "u_…", "site": "jobs.example.com", "scopes": ["list", "apply"],
- "user_info": {"user:name": "Ada"}, "stepup": true}
+ "user_info": {"user:name": "Ada"}, "stepup": true, "stepup_ref": "j1"}
 ```
+
+`stepup_ref` is present when the approval was for a step-up request your site signed: it is the `ref` you put in it.
 
 `site` is your site id. When given, the pass must be for exactly that site, and the `url` may be any address your site is reached at (a proxy or a test server); the DPoP proof still has to match that `url`. Without `site`, the pass must be for the `url`'s host. `action` rejects a step-up approved for a different action. Both are optional but recommended.
 
@@ -147,7 +151,7 @@ Use up a step-up token (local mode).
 {"stepup_token": "…", "site": "jobs.example.com", "action": "apply"}
 ```
 
-→ `{"valid": true, "agent_id": "…", "user_id": "…", "site": "…", "actions": ["apply"]}`. A second call with the same token returns `{"valid": false, "error": "stepup token used or expired"}`.
+→ `{"valid": true, "agent_id": "…", "user_id": "…", "site": "…", "actions": ["apply"], "ref": "j1"}` (`ref` only for a site-signed request). A second call with the same token returns `{"valid": false, "error": "stepup token used or expired"}`.
 
 ### POST /api/v1/reports
 

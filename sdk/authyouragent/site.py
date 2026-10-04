@@ -54,6 +54,9 @@ class Auth:
         self.site = d.get("site")
         self.scopes = d.get("scopes", [])
         self.stepup = d.get("stepup", False)
+        # the `ref` from the site's own signed step-up request, when the
+        # approval was for one: compare it to the request being served
+        self.stepup_ref = d.get("stepup_ref")
         # v19: the user-info fields the user consented to sharing with THIS
         # site (values, e.g. {"user:email": "...", "user:name": "..."}).
         # Empty dict when the grant declares none or the user has no value.
@@ -456,17 +459,18 @@ class SiteVerifier:
             raise AuthError("grant for site revoked")
 
         # 4. step-up (rare — single-use state lives in the cloud)
-        stepup = False
+        stepup, ref = False, None
         if stepup_header:
+            self._last_ref = None
             ok2, err = self._verify_stepup(stepup_header, agent_id, aud)
             if not ok2:
                 raise AuthError(f"step-up: {err}")
-            stepup = True
+            stepup, ref = True, self._last_ref
 
         return Auth({"agent_id": agent_id, "user_id": at_claims.get("user"),
                      "site": aud, "scopes": at_claims.get("scope", []),
                      "user_info": at_claims.get("user_info", {}),
-                     "stepup": stepup})
+                     "stepup": stepup, "stepup_ref": ref})
 
     def _verify_stepup(self, tok, agent_id, aud):
         try:
@@ -490,6 +494,7 @@ class SiteVerifier:
         if not isinstance(r, dict) or r.get("valid") is not True:
             err = r.get("error") if isinstance(r, dict) else None
             return False, err or "stepup token used or expired"
+        self._last_ref = c.get("ref")
         return True, None
 
     def _stepup_single_use(self, tok):
@@ -563,6 +568,80 @@ class SiteVerifier:
         if r.status_code != 200:
             raise AuthError(f"cloud {r.status_code}")
         return r.json()
+
+
+class StepupSigner:
+    """Describe a step-up in the site's own words, signed by the site.
+
+    The owner's phone then shows your text ("Apply to Lighthouse keeper at
+    Coastal Authority") instead of the agent's action name, and the approval
+    carries your `ref`, so you can check it was for this exact request:
+
+        signer = StepupSigner(site="jobs.example.com", cloud="https://authyouragent.com",
+                              key_file="site-stepup.pem")
+        # publish signer.jwks() at https://jobs.example.com/.well-known/authyouragent-site-keys.json
+        if not auth.stepup:
+            raise HTTPException(403, signer.required(auth.agent_id, "apply",
+                                f"Apply to {job.title} at {job.org}", ref=job.id))
+        if auth.stepup_ref != job.id:
+            raise HTTPException(403, {"error": "approved for another job"})
+
+    The key is the site's own (EC P-256), separate from everything else;
+    `StepupSigner.new_key()` makes one. Keep it on the site's server only.
+    """
+
+    def __init__(self, site, cloud, key_pem=None, key_file=None, kid=None, ttl=300):
+        from cryptography.hazmat.primitives import serialization
+        if key_file:
+            with open(key_file, "rb") as f:
+                key_pem = f.read()
+        if not key_pem:
+            raise ValueError("StepupSigner needs key_pem or key_file")
+        if isinstance(key_pem, str):
+            key_pem = key_pem.encode()
+        self.key = serialization.load_pem_private_key(key_pem, password=None)
+        if not isinstance(self.key, ec.EllipticCurvePrivateKey) or self.key.curve.name != "secp256r1":
+            raise ValueError("the step-up key must be EC P-256")
+        self.site = site
+        self.cloud = cloud.rstrip("/")
+        self.ttl = max(30, min(int(ttl), 600))
+        self.kid = kid or _jwk_thumbprint(self._public_jwk())[:16]
+
+    @staticmethod
+    def new_key():
+        """A new P-256 private key, PEM (keep it on the site's server)."""
+        from cryptography.hazmat.primitives import serialization
+        k = ec.generate_private_key(ec.SECP256R1())
+        return k.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                               serialization.NoEncryption()).decode()
+
+    def _public_jwk(self):
+        n = self.key.public_key().public_numbers()
+        b = lambda i: base64.urlsafe_b64encode(i.to_bytes(32, "big")).rstrip(b"=").decode()
+        return {"kty": "EC", "crv": "P-256", "x": b(n.x), "y": b(n.y)}
+
+    def jwks(self):
+        """What to serve at /.well-known/authyouragent-site-keys.json."""
+        return {"keys": [{**self._public_jwk(), "kid": self.kid, "use": "sig", "alg": "ES256"}]}
+
+    def sign(self, agent_id, action, text, ref=None):
+        """A signed step-up request for this agent and action. `text` is what
+        the owner reads: one line, at most 120 characters."""
+        text = str(text).strip()
+        if not text or len(text) > 120 or any(ord(ch) < 32 for ch in text):
+            raise ValueError("text: one line, 1-120 characters")
+        now = int(time.time())
+        claims = {"iss": self.site, "aud": self.cloud, "sub": agent_id, "iat": now,
+                  "exp": now + self.ttl, "action": action, "text": text}
+        if ref is not None:
+            claims["ref"] = str(ref)[:80]
+        return pyjwt.encode(claims, self.key, algorithm="ES256",
+                            headers={"kid": self.kid, "typ": "aya-stepup+jwt"})
+
+    def required(self, agent_id, action, text, ref=None):
+        """The 403 body for a step-up: {"error": "stepup_required", ...}."""
+        return {"error": "stepup_required", "action": action,
+                "stepup_request": self.sign(agent_id, action, text, ref)}
 
 
 def _auth_bearer(h):
