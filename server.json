@@ -1,0 +1,59 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "com.authyouragent/mcp",
+  "title": "Auth Your Agent",
+  "description": "Act for a person on websites: sandboxed browser, phone approvals, take over at sign-in walls.",
+  "websiteUrl": "https://authyouragent.com",
+  "repository": {
+    "url": "https://github.com/kjames2001/authyouragent",
+    "source": "github"
+  },
+  "version": "0.3.24",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "authyouragent",
+      "version": "0.3.24",
+      "runtimeHint": "uvx",
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "--from",
+          "value": "authyouragent[mcp]"
+        }
+      ],
+      "packageArguments": [],
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "AYA_AGENT_ID",
+          "description": "Your agent's id (ag_...), from Agents in the Auth Your Agent app",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "AYA_KEY_FILE",
+          "description": "Path to the agent's private key (PEM), created with: authyouragent keygen",
+          "isRequired": true,
+          "format": "filepath"
+        },
+        {
+          "name": "AYA_VAULT_URL",
+          "description": "Browser vault address",
+          "isRequired": false,
+          "format": "string",
+          "default": "http://127.0.0.1:7801"
+        },
+        {
+          "name": "AYA_VAULT_TOKEN_FILE",
+          "description": "Path to the vault's token file",
+          "isRequired": false,
+          "format": "filepath",
+          "default": "~/.authyouragent/vault/token"
+        }
+      ]
+    }
+  ]
+}

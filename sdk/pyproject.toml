@@ -13,7 +13,7 @@ dependencies = ["httpx>=0.25", "pyjwt>=2.8", "cryptography>=41"]
 keywords = ["ai-agents", "authorization", "dpop", "webauthn", "identity", "mcp", "takeover"]
 
 # PyPI MCP registry: mcp-name must appear in README for registry verification
-# mcp-name: com.authyouragent.mcp
+# mcp-name: com.authyouragent/mcp
 
 [project.optional-dependencies]
 takeover = ["websockets>=12"]

@@ -1,4 +1,4 @@
-<!-- mcp-name: com.authyouragent.mcp -->
+<!-- mcp-name: com.authyouragent/mcp -->
 # authyouragent (Python)
 
 SDK for [Auth Your Agent](https://authyouragent.com): let AI agents act for a person on websites, with the person's approval on their phone.
