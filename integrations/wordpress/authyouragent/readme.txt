@@ -1,5 +1,5 @@
 === Auth Your Agent ===
-Contributors: authyouragent
+Contributors: kjames2001
 Tags: ai agents, woocommerce, openid connect, login, checkout
 Requires at least: 6.4
 Tested up to: 7.1
