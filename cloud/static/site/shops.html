@@ -1,0 +1,87 @@
+<section class="band story-hero"><div class="in">
+  <p class="kicker">For shops</p>
+  <h1>AI assistants are bringing you customers. Let them finish the order.</h1>
+  <p class="lead">People now ask an assistant to find a product, compare prices and order it. When the assistant
+    gets stuck at your sign-in or your checkout, it doesn't wait: it tells the customer it couldn't, or buys
+    somewhere it can. Your analytics never show that order as lost. Auth Your Agent lets the assistant sign in
+    as your customer's approved agent and complete the purchase, with the customer confirming the payment on their phone.</p>
+  <nav class="storynav" aria-label="Sections">
+    <a href="#lost">Where orders are lost</a>
+    <a href="#how">How it works</a>
+    <a href="#customers">Why customers trust it</a>
+    <a href="#setup">Setup</a>
+    <a href="#cost">Cost</a>
+  </nav>
+  <div class="actions" style="margin-top:22px">
+    <a class="btn" href="/check">Check your shop free</a>
+    <a class="btn ghost" href="https://demo.authyouragent.com">Try the demo shop</a>
+  </div>
+</div></section>
+
+<section class="band" id="lost"><div class="in">
+  <h2>Where an assistant's order is lost</h2>
+  <p class="sub">The same places a person drops off, except an assistant cannot work around them.</p>
+  <dl class="facts">
+    <dt>The front door</dt><dd>A bot challenge on the home page, or a robots.txt that turns away ChatGPT, Claude or
+      Perplexity when they visit for a user. The assistant never sees your products.</dd>
+    <dt>Sign-in</dt><dd>Repeat customers have accounts, saved addresses and loyalty prices. An assistant can't solve a
+      CAPTCHA, and careful customers won't give it their password.</dd>
+    <dt>Checkout</dt><dd>The customer wants a say before money moves, and the assistant has no way to ask them inside
+      your checkout. So it stops and hands the job back, and the customer often doesn't come back to finish it.</dd>
+  </dl>
+  <p><a href="/check">See which of these your shop has</a>, from the outside, in about ten seconds.</p>
+</div></section>
+
+<section class="band" id="how"><div class="in">
+  <h2>How it works</h2>
+  <ol class="story">
+    <li><span class="t">Sign-in</span>
+      <div><b>The assistant asks; the customer approves.</b> Your sign-in page gets one more button, "Sign in with
+        Auth Your Agent", next to Google or Apple. The customer approves on their phone, and the assistant gets its own
+        account on your shop, linked to that customer. No password changes hands.</div></li>
+    <li><span class="t">Browsing</span>
+      <div><b>It shops like the customer would.</b> Same catalogue, same prices, same basket. The agent's account
+        is named for what it is, for example "Jarvis (agent of James)", so you can see which orders came through an agent.</div></li>
+    <li><span class="t">Payment</span>
+      <div><b>The customer confirms, in your words.</b> Your shop asks for confirmation; the customer's phone shows
+        your text, for example "Pay $45.00 for order 1234 (Brass lighthouse lamp)", and they approve with their
+        fingerprint. The assistant cannot change that text.</div></li>
+    <li><span class="t">Afterwards</span>
+      <div><b>One tap ends it.</b> The customer can withdraw the assistant's access at any time; its session on
+        your shop ends within minutes, at once if your sign-in supports back-channel logout.</div></li>
+  </ol>
+  <p class="note">Watch it: <a href="/static/video/demo-shop-checkout.mp4">a recorded checkout</a> on the demo shop.</p>
+</div></section>
+
+<section class="band" id="customers"><div class="in">
+  <h2>Why customers will let an assistant buy from you</h2>
+  <dl class="facts">
+    <dt>They never share a password</dt><dd>The assistant gets its own access, for your shop only, which the customer can take back.</dd>
+    <dt>They see what they are paying for</dt><dd>The confirmation shows your amount and item, not the assistant's summary of them.</dd>
+    <dt>Nothing is charged without them</dt><dd>Each payment needs the customer's fingerprint or face on their own phone.</dd>
+  </dl>
+  <p>That is what makes a customer comfortable saying "go ahead and order it", which is the sale you want.</p>
+</div></section>
+
+<section class="band" id="setup"><div class="in">
+  <h2>Setup: an afternoon, not a project</h2>
+  <dl class="facts">
+    <dt>Sign-in</dt><dd>Standard OpenID Connect: an issuer, a client ID and a secret. Your shop platform's existing
+      sign-in plugin usually does it. Step-by-step guides for WooCommerce, Auth.js, Keycloak, Authentik and Django.</dd>
+    <dt>Payment confirmation</dt><dd>One call from your checkout with the text the customer should see. The demo shop's
+      Buy button is a working example.</dd>
+    <dt>Nothing else changes</dt><dd>People still shop the way they do now. Agents simply have a way in that doesn't need a password.</dd>
+  </dl>
+  <div class="actions" style="margin-top:22px">
+    <a class="btn" href="/docs/developers/sites">Setup guide</a>
+    <a class="btn ghost" href="/docs/developers/sites#wordpress-and-woocommerce">WooCommerce steps</a>
+  </div>
+</div></section>
+
+<section class="band" id="cost"><div class="in">
+  <h2>Cost</h2>
+  <p>Free during early access, for every shop. After that, free up to 100,000 agent checks a month, which covers
+    most small and medium shops; <a href="/pitch#model">larger plans</a> are proposed, not yet in effect.</p>
+  <p>Want help setting it up? Write to <a href="mailto:support@authyouragent.com">support@authyouragent.com</a>:
+    we're looking for the first shops and will do the integration with you.</p>
+</div></section>
