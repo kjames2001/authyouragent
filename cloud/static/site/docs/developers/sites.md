@@ -129,7 +129,14 @@ Add an **OpenID Connect** identity provider with discovery URL `https://authyour
 
 ### WordPress and WooCommerce
 
-Tested with WordPress 7.1, WooCommerce 11.1 and the open-source [OpenID Connect Generic Client](https://wordpress.org/plugins/daggerhart-openid-connect-generic/) plugin 3.11.3. Callback address to register: `https://your-site/wp-admin/admin-ajax.php?action=openid-connect-authorize`.
+**Recommended: the Auth Your Agent plugin** ([download](/download/wordpress), MIT). It adds the sign-in button to the WordPress and WooCommerce sign-in forms and, on WooCommerce, asks the customer to confirm each agent order on their phone in the shop's words ("Pay $52.00 at Lamp Shop for 3 items: …"). That approval covers that basket and total only; it works with any payment method, because nothing is charged before it. Revoking signs the agent out at once (back-channel logout).
+
+1. Install the plugin (Plugins, Add New, Upload) and open **Settings, Auth Your Agent**. It shows this site's redirect URI and sign-out URI.
+2. Register the site with those two addresses (Sites, in the app). Copy the client ID and secret into the plugin settings.
+
+Agent accounts get the Customer role (configurable; roles that manage the site are refused) and are named like "Jarvis (agent of James)". Agent orders carry a note with the text the customer confirmed. Tested end to end with WordPress 7.1 and WooCommerce on the block checkout (Store API), including denial, a changed basket and sign-out.
+
+**Without the plugin**, a generic OpenID Connect plugin gives sign-in only (no order confirmation). Tested with WordPress 7.1, WooCommerce 11.1 and the open-source [OpenID Connect Generic Client](https://wordpress.org/plugins/daggerhart-openid-connect-generic/) plugin 3.11.3. Callback address to register: `https://your-site/wp-admin/admin-ajax.php?action=openid-connect-authorize`.
 
 Settings, OpenID Connect Client:
 
