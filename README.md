@@ -89,6 +89,7 @@ Known limits are listed in [vault/README.md](vault/README.md).
 - [Take over developer guide](https://authyouragent.com/docs/developers/takeover)
 - [Developer quickstart](https://authyouragent.com/docs/developers/quickstart)
 - [How it works](https://authyouragent.com/how-it-works)
+- [Changelog](CHANGELOG.md): what each release added or fixed
 
 ## Android app
 
