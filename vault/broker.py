@@ -267,12 +267,13 @@ def _save(path, data):
         pass
 
 
-def _report(agent, status, site, detail):
-    """Status line on the owner's dashboard, one per site. Never raises."""
+def _report(agent, status, site, detail, quiet=False):
+    """Status line on the owner's dashboard, one per site. Never raises.
+    quiet: record it, but the owner was already notified another way."""
     try:
         r = agent.client.post(f"{agent.base}/api/v1/agent-status", timeout=10, json={
             "agent_id": agent.agent_id, "agent_jwt": agent._agent_jwt(),
-            "status": status, "site": site, "detail": detail[:280]})
+            "status": status, "site": site, "detail": detail[:280], "quiet": quiet})
         if r.status_code >= 400:
             _log("status report refused:", r.status_code, r.text[:120])
     except Exception as e:
@@ -473,6 +474,7 @@ class Vault:
         self.lock = asyncio.Lock()
         self.chrome_lock = asyncio.Lock()
         self.jobs = {}
+        self.ledger = []             # what the vault decided this session, for the summary
         self._agent = None
         self.wba_key = None          # Ed25519 key, set once the cloud publishes it
         self.wba_agent = None        # Signature-Agent address (https://<label>.agents...)
@@ -876,19 +878,23 @@ class Vault:
         self.in_takeover = False
         async with self.lock:
             report = {}
-            if self.used:
+            used = self.used
+            if used:
                 try:
                     report = await asyncio.wait_for(self.sign_out(), 90)
                 except Exception as e:
                     report = {"*": f"sign-out failed: {type(e).__name__}"}
+            summarised = used and await asyncio.to_thread(self.send_summary, why, report)
             await self.stop_chrome()
             await self.start_chrome()
-            self.used, self.hosts, self.origins = False, set(), set()
+            self.used, self.hosts, self.origins, self.ledger = False, set(), set(), []
             trust.reset()
             _save(SIGNED_IN_FILE, [])
             _log("session ended:", why, report)
             for site, result in report.items():
-                await asyncio.to_thread(_report, self.agent(), "session_cleared", site, f"{why}: {result}")
+                # the summary already told the owner: dashboard line only
+                await asyncio.to_thread(_report, self.agent(), "session_cleared", site,
+                                        f"{why}: {result}", summarised)
             return report
 
     # ── crash record ──
@@ -902,6 +908,68 @@ class Vault:
         except Exception:
             return
         _save(SIGNED_IN_FILE, sites)
+
+    def note(self, kind, site, what, extra=""):
+        """Record one thing for the end-of-session summary. The vault writes
+        it from its own decisions, so the summary does not depend on the
+        agent reporting anything."""
+        if len(self.ledger) < 200:
+            self.ledger.append((kind, site or "", (what or "").replace("_", " ")[:60], extra[:40]))
+
+    def summary(self, why, report):
+        """(title, text) for the owner's phone when a session ends."""
+        reason = {
+            "agent finished": "The agent ended the session.",
+            "agent stopped sending heartbeats": "The agent stopped responding without ending the "
+                                                "session: it may have crashed or quit before finishing.",
+            "agent revoked by the owner": "You revoked the agent.",
+            "vault shutting down": "The vault was shut down.",
+        }.get(why, why)
+        lines = [reason]
+        # the addresses the agent opened (not parent domains), plus any site
+        # the vault had to sign out of that the agent reached only by redirect
+        seen = {h[4:] if h.startswith("www.") else h for h in self.hosts if h}
+        sites = sorted(seen | {s for s, res in report.items() if s != "*"
+                               and "nothing to sign out" not in res
+                               and not any(h == s or h.endswith("." + s) for h in seen)})
+        if sites:
+            lines.append("Sites: " + ", ".join(sites[:8]) + (f" (+{len(sites) - 8})" if len(sites) > 8 else ""))
+        groups = [("approved", "You approved"), ("denied", "You denied"),
+                  ("expired", "No answer, not done"), ("auto", "Went through by your approval mode"),
+                  ("unknown", "Clicked, the site never answered"), ("takeover", "Take over")]
+        for kind, head in groups:
+            items = [f"{w}{' ' + x if x else ''} ({s})" for k, s, w, x in self.ledger if k == kind]
+            if items:
+                shown = "; ".join(items[:4]) + (f"; +{len(items) - 4} more" if len(items) > 4 else "")
+                lines.append(f"{head}: {shown}")
+        if not any(k in ("approved", "denied", "expired", "auto") for k, *_ in self.ledger):
+            lines.append("Nothing needed your approval.")
+        outs = []
+        for site, res in report.items():
+            if "nothing to sign out" in res:
+                continue
+            ok = "signed out (checked" in res
+            outs.append(f"{site} {'confirmed' if ok else 'NOT confirmed, cookies wiped'}")
+        if outs:
+            lines.append("Sign-out: " + "; ".join(outs))
+        stopped = why == "agent stopped sending heartbeats"
+        return ("Session ended: agent stopped" if stopped else "Session ended"), "\n".join(lines)
+
+    def send_summary(self, why, report):
+        """One notification per session. Returns True if the cloud took it."""
+        try:
+            title, text = self.summary(why, report)
+            agent = self.agent()
+            r = agent.client.post(f"{agent.base}/api/v1/agent-notify", timeout=10, json={
+                "agent_id": agent.agent_id, "agent_jwt": agent._agent_jwt(),
+                "kind": "session_summary", "title": title, "text": text})
+            if r.status_code >= 400:
+                _log("session summary refused:", r.status_code, r.text[:120])
+                return False
+            return True
+        except Exception as e:
+            _log("session summary failed:", e)
+            return False
 
     def report_crash(self):
         """At startup: sites left signed in by a vault that did not shut down
@@ -1168,8 +1236,10 @@ async def _approve(page, label, site=None, details=None):
         raise RuntimeError(f"approval request refused: {r.status_code} {r.text[:200]}")
     j = r.json()
     txn = j["txn_id"]
+    shown = (details or {}).get("amount", "")
     if j.get("auto"):
         _log("approved by the owner's approval mode:", site, action, j.get("why", ""))
+        V.note("auto", site, label, shown)
         return "approved"
     _log("approval requested:", site, action, txn)
     deadline = time.time() + APPROVAL_WAIT
@@ -1183,7 +1253,9 @@ async def _approve(page, label, site=None, details=None):
             st = None
         if st in ("approved", "denied", "expired", "cancelled"):
             _log("approval", st, action)
+            V.note("expired" if st == "cancelled" else st, site, label, shown)
             return st
+    V.note("expired", site, label, shown)
     return "expired"
 
 
@@ -1414,6 +1486,7 @@ async def _guarded(page, selector, label_of, act, submits_form):
                            "unknown": not ok, "read": False}
         if not ok:
             _log("money click result unknown:", site, label)
+            V.note("unknown", site, label, details.get("amount", ""))
             raise ResultUnknown(
                 f"'{label}'{' ' + details['amount'] if details.get('amount') else ''} was clicked, but {site} "
                 f"did not answer within {ANSWER_WAIT} s: it may or may not have gone through. Do NOT click it "
@@ -1751,6 +1824,7 @@ async def _after_takeover(job, agent, site, result):
     job["final"] = page.url
     if result == "done" and not await login_finished(page):
         result = "incomplete"
+    V.note("takeover", _site(site), result)
     await asyncio.to_thread(agent.report_status, f"takeover_{result}", site)
     return result
 

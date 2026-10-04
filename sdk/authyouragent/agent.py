@@ -426,6 +426,20 @@ class AgentClient:
                 return st
         return "expired"
 
+    def notify(self, text, title=""):
+        """Send the owner a one-way note on their phone ("done", "stuck").
+        Nothing to approve. Returns True if at least one device got it.
+        Raises AgentError if the note cannot be sent."""
+        try:
+            r = self.client.post(f"{self.base}/api/v1/agent-notify", json={
+                "agent_id": self.agent_id, "agent_jwt": self._agent_jwt(),
+                "text": text, "title": title}, timeout=15)
+        except httpx.HTTPError as e:
+            raise AgentError(f"note failed: {e}")
+        if r.status_code != 200:
+            raise AgentError(f"note returned {r.status_code}: {r.text[:200]}")
+        return bool(r.json().get("sent"))
+
     def _stepup(self, site, action):
         try:
             r = self.client.post(f"{self.base}/api/v1/stepup", json={
@@ -576,6 +590,40 @@ def _cli_approve(argv):
     return {"approved": 0, "denied": 1}.get(st, 3)
 
 
+def _cli_notify(argv):
+    """`authyouragent notify "<text>"`: a one-way note to the owner's phone,
+    for the end of a job: `make deploy; authyouragent notify "deploy: exit $?"`."""
+    import argparse
+    ap = argparse.ArgumentParser(
+        prog="authyouragent notify",
+        description="Send a one-way note to your phone, e.g. when a long job ends. Nothing to approve.",
+        epilog="exit codes: 0 delivered, 1 sent but no device has notifications on, "
+               "2 setup or request error. Text '-' reads standard input. "
+               "Agent from --agent-id/--key or AYA_AGENT_ID/AYA_KEY_FILE; server from AYA_CLOUD.")
+    ap.add_argument("text", help="the message (up to 600 characters, 12 lines); '-' reads stdin")
+    ap.add_argument("--title", default="", help="notification title (default: the agent's name)")
+    ap.add_argument("--agent-id", default=os.environ.get("AYA_AGENT_ID"))
+    ap.add_argument("--key", default=os.environ.get("AYA_KEY_FILE"), help="agent private key (PEM)")
+    ap.add_argument("--cloud", default=os.environ.get("AYA_CLOUD", "https://authyouragent.com"))
+    ap.add_argument("-q", "--quiet", action="store_true", help="print nothing; use the exit code")
+    a = ap.parse_args(argv)
+    say = (lambda *_: None) if a.quiet else (lambda m: print(m, file=sys.stderr, flush=True))
+    if not a.agent_id or not a.key:
+        say("authyouragent notify: need --agent-id and --key (or AYA_AGENT_ID / AYA_KEY_FILE)")
+        return 2
+    text = sys.stdin.read() if a.text == "-" else a.text
+    try:
+        pem = open(os.path.expanduser(a.key)).read()
+        agent = AgentClient(base_url=a.cloud, agent_id=a.agent_id, privkey_pem=pem,
+                            verify=not os.environ.get("AYA_INSECURE"))
+        sent = agent.notify(text, title=a.title)
+    except (OSError, ValueError, AgentError) as e:
+        say(f"authyouragent notify: {e}")
+        return 2
+    say("sent" if sent else "recorded, but no device has notifications on")
+    return 0 if sent else 1
+
+
 def _cli_main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["vault"]:
@@ -583,9 +631,11 @@ def _cli_main(argv=None):
         return vault_main(argv[1:])
     if argv[:1] == ["approve"]:
         sys.exit(_cli_approve(argv[1:]))
+    if argv[:1] == ["notify"]:
+        sys.exit(_cli_notify(argv[1:]))
     import argparse
     ap = argparse.ArgumentParser(prog="authyouragent",
-                                 epilog="also: authyouragent approve <site> <action>; "
+                                 epilog="also: authyouragent approve <site> <action>; authyouragent notify <text>; "
                                         "authyouragent vault up|down|status|env")
     ap.add_argument("cmd", choices=["keygen"])
     ap.add_argument("--name", default="agent")

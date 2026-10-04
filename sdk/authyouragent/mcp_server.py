@@ -567,6 +567,26 @@ async def request_approval(site: str, action: str, wait_seconds: int = 120,
 
 
 @mcp.tool()
+async def notify_owner(text: str, title: str = "") -> str:
+    """Send your owner a one-way note on their phone. Nothing to approve.
+    Use it when the owner asked to hear back ("message me when you're done"),
+    when you finish a long task, or when you are stuck and stopping.
+    Say what happened, plainly, including anything that failed or that you
+    could not check. Do not use it to ask permission: use request_approval.
+    text: up to 600 characters. title: optional, defaults to your agent name.
+    Also: when a browser session ends, the vault sends the owner its own
+    summary (sites, approvals, sign-outs) whether or not you call this.
+    Returns: sent / recorded (no device has notifications on) / error."""
+    agent = _get_agent()
+    try:
+        sent = await asyncio.to_thread(agent.notify, text, title)
+    except Exception as e:
+        return f"error: {e}"
+    return ("sent\nThe note is on the owner's phone." if sent else
+            "recorded\nThe owner has no device with notifications on; the note is in their Activity log.")
+
+
+@mcp.tool()
 async def check_agent_status() -> str:
     """Check whether your agent is still authorized by the owner. The owner can revoke
     your access at any time from their phone. Call this periodically (e.g. before

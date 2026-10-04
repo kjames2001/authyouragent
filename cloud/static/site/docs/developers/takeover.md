@@ -35,7 +35,7 @@ The vault needs Docker. `vault up` starts it on `127.0.0.1:7801` with every prot
 
 `AYA_AGENT_ID` and the key come from adding the agent in the app (**Agents → Add an agent**). Node-based clients can use `npx authyouragent-mcp` instead of `authyouragent-mcp`.
 
-The agent gets nineteen tools:
+The agent gets twenty tools:
 
 | Tool | Purpose |
 |---|---|
@@ -48,6 +48,7 @@ The agent gets nineteen tools:
 | `request_takeover(reason)` | Ask the owner to take over. Returns `done`, `cancelled`, `expired` or `incomplete` with a line saying what to do next, or `waiting` with a `takeover_id` after `wait_seconds` (default 240). |
 | `wait_for_takeover(takeover_id)` | Keep waiting after `waiting`. |
 | `request_approval(site, action)` | Ask the owner to approve an action. `approved`, `denied` or `expired`. |
+| `notify_owner(text)` | A one-way note to the owner's phone ("done", "stuck"). Nothing to approve. |
 | `end_session` | Sign out of every site used, then destroy the browser profile. Reports per site whether sign-out was confirmed. |
 | `check_agent_status` | `active` or `revoked`. |
 | `report_site` | Report a site where take over did not work. |

@@ -26,6 +26,7 @@ authyouragent vault up --agent-id ag_xxxxx --key /path/to/agent-key.pem
 - **`request_takeover`** / **`wait_for_takeover`**: the owner takes over from
   their phone; the vault hands back once they have signed in.
 - **`request_approval`**: ask the owner to approve an action.
+- **`notify_owner`**: a one-way note to the owner's phone ("done", "stuck").
 - **`end_session`**: sign out of every site used, then destroy the browser
   profile.
 - **`check_agent_status`**: is the agent still authorized?

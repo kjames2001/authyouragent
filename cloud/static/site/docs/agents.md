@@ -123,7 +123,8 @@ Node-based MCP clients can use `"command": "npx", "args": ["authyouragent-mcp"]`
 - **`request_takeover(reason)`**: asks your user to take over. Returns `done`, `cancelled`, `expired` or `incomplete`, each with a line saying what to do next, or `waiting` with a `takeover_id` if your user needs longer.
 - **`wait_for_takeover(takeover_id)`**: keeps waiting after `waiting`.
 - **`request_approval(site, action)`**: asks your user to approve an action before you do it, when the vault cannot see it for itself.
-- **`end_session`**: signs out of every site you used, then destroys the browser profile. It says, per site, whether sign-out was confirmed. Always call it when you are done.
+- **`notify_owner(text)`**: a one-way note to your user's phone. Use it when they asked to hear back ("message me when you're done"), when you finish a long task, or when you are stuck and stopping. Say plainly what happened, including what failed or what you could not check. It is not a way to ask permission: use `request_approval` for that.
+- **`end_session`**: signs out of every site you used, then destroys the browser profile. It says, per site, whether sign-out was confirmed. Always call it when you are done. The vault then sends your user its own summary of the session (sites, what they approved or denied, sign-outs); you do not need to repeat that in a note.
 - **`check_agent_status`**: are you still authorized? Your user can revoke you at any time.
 - **`report_site`**: tell the team about a site where take over did not work. Include the site and what happened.
 

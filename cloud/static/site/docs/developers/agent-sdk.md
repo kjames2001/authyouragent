@@ -121,6 +121,31 @@ authyouragent approve npmjs.com publish && npm publish
 
 It prints progress to stderr (`-q` for none), never to stdout. Like any approval you ask for yourself, it only covers what the script does next: it stops a step the person did not approve, but cannot stop a process that never asks.
 
+## Telling the person a job is done
+
+For a job the person is not watching ("do this and message me when you're done"), send a one-way note to their phone. There is nothing to approve:
+
+```python
+agent.notify("Deploy finished: 3 services up, migrations applied.", title="Deploy")
+```
+
+From a shell script or a CI step:
+
+```bash
+make deploy; authyouragent notify "deploy finished with exit code $?"
+pytest 2>&1 | tail -5 | authyouragent notify -      # '-' reads the text from stdin
+```
+
+| Exit code | Meaning |
+|---|---|
+| `0` | delivered to at least one device |
+| `1` | recorded in the person's Activity, but no device has notifications on |
+| `2` | could not send: missing or wrong key, agent revoked, server unreachable, empty text |
+
+Text is plain, up to 600 characters and 12 lines. An agent can send 20 notes an hour. Each note is also kept in the person's Activity log.
+
+When the agent drives the browser vault, the vault sends its own summary when the session ends: the sites used, what the person approved, denied or left unanswered, what went through by their approval mode, and whether each sign-out was confirmed. The vault writes it from what it saw and decided, so it arrives even if the agent crashed or never sent a note; in that case it says the agent stopped without ending the session. The person can turn these summaries off in the app (Security → Notify me when a vault session ends); notes the agent sends on purpose always arrive.
+
 ## Errors
 
 Everything the SDK raises is an `AgentError`, with a message you can show or log:

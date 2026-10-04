@@ -104,6 +104,16 @@ Returns `approved`, `denied` or `expired`. Do not act until `approved`.
 
 Signs out of every site you used, confirms it where it can, then destroys the browser profile. The result lists each site; if a site says "wiped locally, not signed out", tell your owner which one so they can end that session from the site's own device list.
 
+### notify_owner
+
+**When:** Your owner asked to hear back, you finished a long task, or you are stuck and stopping.
+
+```
+notify_owner(text: "Done: 12 PRs reviewed, 2 need you (#41, #57). Could not run the e2e suite.")
+```
+
+One-way, nothing to approve. Be plain about what failed. When a browser session ends the vault sends its own summary too, so you need not list sites or approvals.
+
 ### check_agent_status
 
 **When:** Before starting a task, and during long tasks. Returns `active` or `revoked` (stop all work).

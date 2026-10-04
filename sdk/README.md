@@ -32,7 +32,7 @@ For just the SDK (no browser, no MCP): `pip install authyouragent`.
 
 ## MCP server
 
-The `authyouragent-mcp` command starts an MCP server with nineteen tools:
+The `authyouragent-mcp` command starts an MCP server with twenty tools:
 
 - **Browser:** `navigate`, `read_page` (the page's text plus a numbered list
   of links, buttons, fields and dropdowns), and `click`, `type_text`,
@@ -60,8 +60,11 @@ The `authyouragent-mcp` command starts an MCP server with nineteen tools:
   from your phone. The agent is disconnected until you finish, and the vault
   hands back by itself once you have signed in.
 - **`request_approval`**: ask you to approve an action the vault cannot see.
+- **`notify_owner`**: a one-way note to your phone, e.g. "done" or "stuck".
+  Nothing to approve.
 - **`end_session`**: sign out of every site used, then destroy the browser
-  profile. Always called at the end.
+  profile. Always called at the end. The vault then sends you its own summary
+  of the session, whether or not the agent sent a note.
 - **`check_agent_status`**: is the agent still authorized? You can revoke it
   at any time.
 - **`report_site`**: report a site where take over did not work.
@@ -125,6 +128,14 @@ authyouragent approve npmjs.com publish && npm publish
 ```
 
 Exit codes: 0 approved, 1 denied, 2 could not ask (key, revoked, network), 3 no answer in time. From Python: `agent.request_approval("npmjs.com", "publish")`.
+
+Tell your phone when an unattended job ends (one-way, nothing to approve):
+
+```
+make deploy; authyouragent notify "deploy finished with exit code $?"
+```
+
+Exit codes: 0 delivered, 1 recorded but no device has notifications on, 2 could not send. From Python: `agent.notify("done")`.
 
 ```python
 from authyouragent import AgentClient

@@ -94,6 +94,10 @@
       "description": "Ask the owner to approve a sensitive action. Returns approved, denied or expired."
     },
     {
+      "name": "notify_owner",
+      "description": "Send the owner a one-way note on their phone, e.g. done or stuck. Nothing to approve."
+    },
+    {
       "name": "check_agent_status",
       "description": "Check whether the agent is still authorized. The owner can revoke it at any time."
     },
