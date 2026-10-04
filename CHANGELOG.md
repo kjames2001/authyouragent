@@ -2,6 +2,11 @@
 
 Every release of the Python SDK, MCP server and browser vault (`authyouragent` on PyPI, `ghcr.io/kjames2001/authyouragent-vault`), with the changes to the service at authyouragent.com that shipped alongside it. Newest first. Versions are tagged `py-vX.Y.Z` (PyPI) and `js-vX.Y.Z` (npm).
 
+## Unreleased
+
+**Website**
+- Web Bot Auth: agent key lists are now served with `Cache-Control: max-age=300` (was 3600), so after an owner revokes an agent, verifiers stop accepting its signatures within five minutes instead of an hour.
+
 ## 0.3.24 (2026-10-04)
 
 **Python package**
