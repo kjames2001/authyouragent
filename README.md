@@ -83,6 +83,20 @@ Node clients can use `npx authyouragent-mcp` as the command. The agent ID and ke
 
 Known limits are listed in [vault/README.md](vault/README.md).
 
+## Scope: what Auth Your Agent does, and does not do
+
+Auth Your Agent answers one question for a website: **who is acting, for whom, with what permission, and can it be withdrawn.** A feature belongs here if it grants, limits, proves or withdraws an agent's authority on a site. That covers approvals, sign-in for agents, step-ups in the site's own words, take over at a sign-in wall, signing out, and the vault's own record of what was done with the owner's authority.
+
+It does not do:
+
+- **Conversation with the agent.** No multiple-choice or free-text questions, chat or task updates beyond a short note. A card from Auth Your Agent is always about permission, so the owner never learns to tap through it like a chat prompt. Use a tool built for talking to agents (for example [Paseo](https://github.com/getpaseo/paseo)) alongside it.
+- **Running or orchestrating agents.** It works with whichever agent you use; it does not start, schedule or supervise them.
+- **Judging intent with AI.** Approval rules are fixed rules the owner can read. No model decides what is safe.
+- **Getting past sites' defences.** No CAPTCHA solving or bot-detection evasion; the owner takes over instead.
+- **Turning websites into tools.** Learning a site's API calls as MCP tools is a separate project built on top of the vault.
+
+New features are checked against this list first.
+
 ## Documentation
 
 - [For AI agents](https://authyouragent.com/docs/agents)
