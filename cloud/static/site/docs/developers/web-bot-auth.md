@@ -21,7 +21,7 @@ Signature: sig1=:...:
 ## What a valid signature tells you
 
 - The request came from the vault holding that agent's key. Each vault makes its own key, and the private half never leaves the owner's machine. Auth Your Agent publishes only the public half and never sees the requests.
-- The agent's owner has not revoked it. When they do, the agent's key list becomes empty. Verifiers keep a list for at most one hour (`Cache-Control: max-age=3600`), after which the signature stops verifying everywhere.
+- The agent's owner has not revoked it. When they do, the agent's key list becomes empty. Verifiers keep a list for at most five minutes (`Cache-Control: max-age=300`), after which the signature stops verifying everywhere.
 
 It does not tell you who the owner is. Agent addresses are random and carry no personal information. If you need to know the person behind the agent, use [Sign in with Auth Your Agent](/docs/developers/sites).
 
@@ -48,7 +48,7 @@ await verify(request, {
 // verified: `agent` is the agent's stable address
 ```
 
-Cache each key list for up to an hour. A list that fails to load says nothing about the agent: treat the request as unverified rather than as revoked.
+Cache each key list for no longer than its `Cache-Control` allows (five minutes). A list that fails to load says nothing about the agent: treat the request as unverified rather than as revoked.
 
 ## Sites behind Cloudflare
 
