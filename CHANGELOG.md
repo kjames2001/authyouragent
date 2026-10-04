@@ -2,7 +2,10 @@
 
 Every release of the Python SDK, MCP server and browser vault (`authyouragent` on PyPI, `ghcr.io/kjames2001/authyouragent-vault`), with the changes to the service at authyouragent.com that shipped alongside it. Newest first. Versions are tagged `py-vX.Y.Z` (PyPI) and `js-vX.Y.Z` (npm).
 
-## Unreleased
+## 0.3.24 (2026-10-04)
+
+**Python package**
+- No code changes. The README now carries the official MCP Registry marker in the form the registry checks (`mcp-name: com.authyouragent/mcp`), so the MCP server is listed at registry.modelcontextprotocol.io as `com.authyouragent/mcp`. `server.json` at the repository root describes the listing.
 
 **Website**
 - Agent-readiness check at `/check` (and `GET /api/readiness?site=`): what an AI shopping assistant meets on a site, from the outside. Checks for a bot challenge on the home page, robots.txt rules against assistants acting for users (ChatGPT-User, Claude-User, Perplexity-User and their search agents; blocking training crawlers alone is fine), CAPTCHA or password-only sign-in, schema.org product data (home page plus one product page), llms.txt, and whether the site already accepts Sign in with Auth Your Agent or signs its step-ups. Public pages only; domain names only, public addresses only with the connection pinned to the checked address, at most 4 redirects, 1.5 MB and 8 s per page, cached 10 minutes, 20 checks an hour per network. Stores the domain and result counts only.
