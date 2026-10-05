@@ -29,6 +29,7 @@ cloud/site_pages.py
 cloud/takeover.py
 cloud/oidc.py
 cloud/wba.py
+cloud/readiness.py
 cloud/static/index.html
 cloud/static/takeover.html
 cloud/static/sw.js
@@ -95,6 +96,7 @@ docs/pitch/
 # Local marketing context (marketing skills)
 .agents/
 
-# Local only: built plugin zips (source is integrations/), agent plans
+# Local only: built plugin zips (source is integrations/), outreach drafts, agent plans
 cloud/static/plugins/
+docs/outreach/
 .hermes/
