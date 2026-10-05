@@ -28,6 +28,7 @@ itself (step-up, CIBA, sign-in) always asks: that is the site's rule, not ours.
 import json
 import re
 import time
+import unicodedata
 
 MODES = ("ask", "smart", "off")
 DEFAULT_LIMIT = 20          # smart: actions per agent, per site, per hour
@@ -59,6 +60,34 @@ LOW_RISK = re.compile(
     r"add to (cart|basket|bag|wish ?list|list|favou?rites|collection|reading list|watch ?list)|"
     r"(show|load) more|next page|previous page|done|ok)$", re.I)
 CURRENCY = re.compile(r"([$€£¥₹]|\b(usd|eur|gbp|bwp|zar|p)\b)\s?\d", re.I)
+
+
+HIDDEN = ("Cc", "Cf", "Co", "Cs", "Cn")   # control, format (bidi, zero-width), private, unassigned
+BREAKS = ("Zl", "Zp")                      # Unicode line/paragraph separators
+
+
+def has_hidden(s):
+    """True if the text holds a character the owner cannot see as written:
+    control or format characters (right-to-left overrides, zero-width
+    joiners), private-use or unassigned code points, or Unicode line breaks."""
+    return any(unicodedata.category(ch) in HIDDEN + BREAKS for ch in s)
+
+
+def plain(s, newlines=False):
+    """Text as the owner will read it: hidden characters removed, Unicode line
+    breaks turned into spaces (or into \\n when newlines=True)."""
+    out = []
+    for ch in str(s or ""):
+        cat = unicodedata.category(ch)
+        if ch == "\n" and newlines:
+            out.append(ch)
+        elif cat in BREAKS or ch in "\t\r\x0b\x0c\x85":
+            out.append("\n" if newlines else " ")
+        elif cat == "Cc":                      # other control characters: a space, so words stay apart
+            out.append(" ")
+        elif cat not in HIDDEN:
+            out.append(ch)
+    return "".join(out)
 
 
 def words(label):
@@ -217,8 +246,10 @@ def clean_details(d):
     out = {}
     for k, n in (("label", 80), ("amount", 40), ("item", 120), ("order", 60), ("page", 200), ("repeat", 240)):
         v = d.get(k)
-        if isinstance(v, str) and v.strip():
-            out[k] = re.sub(r"\s+", " ", v).strip()[:n]
+        if isinstance(v, str):
+            v = re.sub(r"\s+", " ", plain(v)).strip()[:n]
+            if v:
+                out[k] = v
     # the vault falls back to the button's words for the item: not worth a line
     if out.get("item") and out.get("label") and words(out["item"]).lower() == words(out["label"]).lower():
         del out["item"]

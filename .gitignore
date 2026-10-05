@@ -91,3 +91,10 @@ sdk-js/node_modules
 
 # pitch deck sources (kept locally, not part of the MCP server)
 docs/pitch/
+
+# Local marketing context (marketing skills)
+.agents/
+
+# Local only: built plugin zips (source is integrations/), agent plans
+cloud/static/plugins/
+.hermes/
