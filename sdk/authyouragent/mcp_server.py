@@ -567,6 +567,81 @@ async def request_approval(site: str, action: str, wait_seconds: int = 120,
 
 
 @mcp.tool()
+async def submit_plan(title: str, start: str, end: str, steps: list[dict]) -> str:
+    """Ask your owner, once and in advance, to pre-approve the actions of a
+    task that will run later while they may be away (a scheduled job).
+    Call it when the job is set up, not when it runs. The owner gets one card
+    and approves all steps, some, or none. During the window, an action that
+    matches a pre-approved step exactly goes through without a card; any
+    other action asks as usual. If the owner does not answer a step's card
+    in time, only that step and the steps chained to it ("after") are
+    skipped; carry on with the others.
+    title: what the task is, e.g. "Nightly Reddit posts" (up to 80 characters).
+    start, end: the window, ISO 8601 with offset ("2026-10-05T15:00:00+02:00")
+      or Unix seconds; 1 minute to 24 hours long.
+    steps: up to 20, in order. Each step:
+      {"id": "s1", "url": "https://www.reddit.com/r/x/submit",
+       "button": "Post",                  # the button's words exactly
+       "texts": ["the title", "the body"], # exact text it sends (required for posts/replies/messages)
+       "path": "/r/x/submit",             # optional: exact path, or a prefix ending in *
+       "after": ["s0"],                   # optional: steps that must be done first
+       "uses": 1}                         # optional: times it may run, 1-5
+    Payments and security changes are listed for the owner but never
+    pre-approved: they always ask at the time.
+    Returns the plan id and status; check it later with plan_status."""
+    agent = _get_agent()
+
+    def ts(v):
+        v = str(v).strip()
+        if re.fullmatch(r"\d{9,11}", v):
+            return int(v)
+        from datetime import datetime
+        d = datetime.fromisoformat(v.replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            raise ValueError("give the time with its offset, e.g. 2026-10-05T15:00:00+02:00")
+        return int(d.timestamp())
+    try:
+        body = {"agent_id": agent.agent_id, "agent_jwt": agent._agent_jwt(), "title": title,
+                "start_at": ts(start), "end_at": ts(end), "steps": steps}
+        r = await asyncio.to_thread(agent.client.post, f"{agent.base}/api/v1/plans", json=body, timeout=15)
+    except Exception as e:
+        return f"error: {e}"
+    if r.status_code != 200:
+        try:
+            return f"error: {r.json().get('detail')}"
+        except Exception:
+            return f"error: server returned {r.status_code}"
+    j = r.json()
+    never = j.get("never_pre_approved") or []
+    return (f"submitted\nplan_id: {j['plan_id']}\nThe owner has a card to pre-approve it; they may answer "
+            "until the window opens. If they do not, every step asks at the time and the run still goes ahead."
+            + (f"\nAlways asks at the time (payment or security): {', '.join(never)}" if never else ""))
+
+
+@mcp.tool()
+async def plan_status(plan_id: str) -> str:
+    """The state of a plan you submitted: for each step, whether it is
+    pre-approved or asks at the time, and what happened (waiting, asking,
+    running, done, skipped, denied, failed, unknown) with the reason."""
+    agent = _get_agent()
+    try:
+        r = await asyncio.to_thread(agent.client.post, f"{agent.base}/api/v1/plans/{plan_id}/status", timeout=15,
+                                    json={"agent_id": agent.agent_id, "agent_jwt": agent._agent_jwt()})
+    except Exception as e:
+        return f"error: {e}"
+    if r.status_code != 200:
+        return f"error: server returned {r.status_code}"
+    p = r.json()
+    lines = [f"{p['title']}: {p['status']} (card: {p['card']})"]
+    for i, s in enumerate(p["steps"], 1):
+        how = "pre-approved" if s["pre_approved"] else "asks at the time"
+        dep = f", after {', '.join(s['after'])}" if s["after"] else ""
+        lines.append(f"{i}. {s['id']} '{s['button']}' on {s['host']}: {s['state']}"
+                     + (f" ({s['reason']})" if s.get("reason") else "") + f"; {how}{dep}; used {s['used']}/{s['uses']}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
 async def notify_owner(text: str, title: str = "") -> str:
     """Send your owner a one-way note on their phone. Nothing to approve.
     Use it when the owner asked to hear back ("message me when you're done"),

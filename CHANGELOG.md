@@ -2,7 +2,17 @@
 
 Every release of the Python SDK, MCP server and browser vault (`authyouragent` on PyPI, `ghcr.io/kjames2001/authyouragent-vault`), with the changes to the service at authyouragent.com that shipped alongside it. Newest first. Versions are tagged `py-vX.Y.Z` (PyPI) and `js-vX.Y.Z` (npm).
 
-## Unreleased
+## 0.3.25 (2026-10-05)
+
+**Scheduled tasks: pre-approval**
+- An agent setting up a task that runs later submits a plan (`submit_plan`, MCP; `POST /api/v1/plans`): a title, a window (1 minute to 24 hours, starting within 30 days) and up to 20 steps, each with its address, the button's words, the exact text it will post or send, how many times it may run, and the steps it must follow (`after`).
+- The owner gets one card with every step and its full text, and pre-approves all steps, some, or none, with their passkey. A card left unanswered pre-approves nothing; the run still goes ahead and each step asks.
+- During the window, an approval request goes through without a card only if it matches a pre-approved step exactly: the same agent, address (and path, where given), button words and text. The vault sends a SHA-256 of each text field the click would send, never the text, and does not click if the text changed after approval. Rules only, no AI.
+- A step the owner does not answer in time, denies, or whose click fails or gets no answer is skipped together with the steps chained to it, which are refused at once without a card. Every other step carries on.
+- Payments and security changes are never pre-approved, even when ticked.
+- `plan_status` (MCP) shows each step's state and why. Plans are listed in the app under the agent's approval modes, with Withdraw.
+- Activity records each step approved by a plan, and each step skipped.
+- The MCP server has 22 tools.
 
 **Website**
 - Web Bot Auth: agent key lists are now served with `Cache-Control: max-age=300` (was 3600), so after an owner revokes an agent, verifiers stop accepting its signatures within five minutes instead of an hour.

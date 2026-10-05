@@ -259,6 +259,14 @@ def clean_details(d):
     for k in ("card_fields", "password_fields"):
         if d.get(k) is True:
             out[k] = True
+    # plans (vault 0.3.25+): the page's path and digests of the form's texts,
+    # compared exactly with a pre-approved step; never shown on the card
+    pth = d.get("path")
+    if isinstance(pth, str) and re.fullmatch(r"/[\x21-\x7e]{0,300}", pth):
+        out["path"] = pth
+    tds = d.get("text_digests")
+    if isinstance(tds, list) and len(tds) <= 8 and all(isinstance(x, str) and re.fullmatch(r"[0-9a-f]{64}", x) for x in tds):
+        out["text_digests"] = sorted(tds)
     return out
 
 

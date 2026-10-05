@@ -114,6 +114,20 @@ notify_owner(text: "Done: 12 PRs reviewed, 2 need you (#41, #57). Could not run 
 
 One-way, nothing to approve. Be plain about what failed. When a browser session ends the vault sends its own summary too, so you need not list sites or approvals.
 
+### submit_plan / plan_status
+
+**When:** You are setting up a task that will run later (a scheduled job) and will click things that need approval. Call it at setup, not at run time.
+
+```
+submit_plan(title: "Nightly Reddit posts", start: "2026-10-05T15:00:00+02:00", end: "2026-10-05T15:30:00+02:00",
+            steps: [{"id": "post", "url": "https://www.reddit.com/r/selfhosted/submit", "button": "Post",
+                     "texts": ["The title", "The body"]},
+                    {"id": "reply", "url": "https://www.reddit.com/r/selfhosted/comments/abc", "button": "Comment",
+                     "texts": ["Thanks."], "after": ["post"]}])
+```
+
+Your owner pre-approves all, some or none of the steps on one card. At run time, type exactly the text you submitted and click the button with exactly those words; a matching click goes through without a card. Anything else asks as usual. A step your owner does not answer in time is skipped, with the steps that name it in `after`; they come back as `not approved: skipped: ...`. Do not retry them; carry on with the rest and report what was skipped with `notify_owner`. Payments and security changes always ask.
+
 ### check_agent_status
 
 **When:** Before starting a task, and during long tasks. Returns `active` or `revoked` (stop all work).

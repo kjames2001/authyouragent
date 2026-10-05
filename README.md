@@ -12,7 +12,7 @@ The MCP server, the browser vault and the SDKs:
 
 | Path | What it is |
 |---|---|
-| [`sdk/authyouragent/mcp_server.py`](sdk/authyouragent/mcp_server.py) | **The MCP server** (stdio, 20 tools). Entry point `authyouragent-mcp`. |
+| [`sdk/authyouragent/mcp_server.py`](sdk/authyouragent/mcp_server.py) | **The MCP server** (stdio, 22 tools). Entry point `authyouragent-mcp`. |
 | [`vault/`](vault/) | **The browser vault**: [`broker.py`](vault/broker.py) (HTTP API the MCP server calls; drives Chromium, detects sign-in, signs out), [`egress.py`](vault/egress.py) (public-internet-only proxy), [`screen.py`](vault/screen.py) (phone screen stream), [`seccomp.json`](vault/seccomp.json), [`chromium-policy.json`](vault/chromium-policy.json), [`Dockerfile`](vault/Dockerfile). Details: [vault/README.md](vault/README.md). |
 | [`sdk/authyouragent/vault_cli.py`](sdk/authyouragent/vault_cli.py) | `authyouragent vault up/down/status/env`: runs the vault with every protection on. |
 | [`sdk/authyouragent/`](sdk/authyouragent/) | Python SDK: agent side ([`agent.py`](sdk/authyouragent/agent.py)), website side ([`site.py`](sdk/authyouragent/site.py)), take-over helper for your own Playwright browser ([`takeover.py`](sdk/authyouragent/takeover.py)). |
@@ -32,6 +32,7 @@ The phone app and the approval service run at authyouragent.com. The agent signs
 | `wait_for_takeover` | Keep waiting after `waiting`. |
 | `request_approval` | Ask the owner to approve an action. `approved`, `denied` or `expired`. |
 | `notify_owner` | A one-way note to the owner's phone: done, stuck, or what failed. Nothing to approve. |
+| `submit_plan`, `plan_status` | For a scheduled task: the owner pre-approves its steps once; matching clicks then go through without a card. A step not answered in time is skipped with the steps chained to it; the rest carries on. |
 | `end_session` | Sign out of every site used, then destroy the browser profile. Reports per site whether sign-out was confirmed. The vault then sends the owner its own summary of the session. |
 | `check_agent_status` | `active` or `revoked`. |
 | `report_site` | Report a site where take over did not work. |

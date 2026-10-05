@@ -32,7 +32,7 @@ For just the SDK (no browser, no MCP): `pip install authyouragent`.
 
 ## MCP server
 
-The `authyouragent-mcp` command starts an MCP server with twenty tools:
+The `authyouragent-mcp` command starts an MCP server with twenty-two tools:
 
 - **Browser:** `navigate`, `read_page` (the page's text plus a numbered list
   of links, buttons, fields and dropdowns), and `click`, `type_text`,
@@ -62,6 +62,13 @@ The `authyouragent-mcp` command starts an MCP server with twenty tools:
 - **`request_approval`**: ask you to approve an action the vault cannot see.
 - **`notify_owner`**: a one-way note to your phone, e.g. "done" or "stuck".
   Nothing to approve.
+- **`submit_plan`** / **`plan_status`**: for a scheduled task. The agent
+  lists what it will do, when and in what order; you pre-approve all steps,
+  some or none, once, on your phone. In the window, an action that matches a
+  pre-approved step exactly (address, button words, the exact text it posts)
+  goes through without a card. A step you do not answer in time is skipped
+  with the steps chained to it; the rest of the plan carries on. Payments and
+  security changes always ask.
 - **`end_session`**: sign out of every site used, then destroy the browser
   profile. Always called at the end. The vault then sends you its own summary
   of the session, whether or not the agent sent a note.

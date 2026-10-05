@@ -26,13 +26,16 @@ Environment:
 """
 import asyncio
 import base64
+import hashlib
 import json
 import os
 import re
 import shutil
 import tempfile
 import time
+import unicodedata
 import uuid
+import weakref
 from urllib.parse import parse_qsl, urlparse
 
 from aiohttp import ClientSession, ClientTimeout, web
@@ -1190,9 +1193,50 @@ DETAILS_JS = r"""(el) => {
   item = text(item.replace(MONEY, '').replace(/[,\s]+$/, ''));
   const inputs = form ? [...form.querySelectorAll('input')] : [];
   const card = inputs.some(i => /cc-|card|cvc|cvv/i.test((i.autocomplete || '') + ' ' + (i.name || '') + ' ' + (i.id || '')));
+  // the texts this click sends: the form's text fields, or (no form) the
+  // editable boxes in the button's area. Only their digests leave the vault.
+  const box = form || btn.closest('[role=dialog],article,section,main') || null;
+  const texts = [];
+  if (box) {
+    for (const f of box.querySelectorAll('textarea,input[type=text],input:not([type]),[contenteditable=""],[contenteditable=true]')) {
+      if (f.parentElement && f.parentElement.closest('[contenteditable=""],[contenteditable=true]')) continue;   // inner nodes of an editor
+      // never card numbers, codes or secrets: a digest of a short number can be reversed
+      if (/cc-|card|cvc|cvv|one-time-code|otp|pass|secret|token|pin\b/i.test((f.autocomplete || '') + ' ' + (f.name || '') + ' ' + (f.id || ''))) continue;
+      const v = (f.isContentEditable ? f.innerText : f.value) || '';
+      if (v.trim()) texts.push(v);
+      if (texts.length >= 8) break;
+    }
+  }
   return {amount: amount.slice(0, 40), item: item.slice(0, 120), order: order.slice(0, 60),
-          card_fields: card, password_fields: inputs.filter(i => i.type === 'password').length >= 2};
+          card_fields: card, password_fields: inputs.filter(i => i.type === 'password').length >= 2,
+          texts};
 }"""
+
+
+HIDDEN_CATS = ("Cc", "Cf", "Co", "Cs", "Cn")
+
+
+def _norm_text(s):
+    """Same rule as the cloud's plans.norm_text: hidden characters out, line
+    ends unified, trailing spaces per line, blank lines and both ends trimmed."""
+    out = []
+    for ch in str(s or "").replace("\r\n", "\n").replace("\r", "\n"):
+        cat = unicodedata.category(ch)
+        if ch == "\n":
+            out.append(ch)
+        elif cat in ("Zl", "Zp") or ch in "\t\x0b\x0c\x85":
+            out.append("\n")
+        elif cat == "Cc":
+            out.append(" ")
+        elif cat not in HIDDEN_CATS:
+            out.append(ch)
+    return "\n".join(l.rstrip() for l in "".join(out).split("\n") if l.strip()).strip()
+
+
+def _text_digests(texts):
+    """sha256 of each text the click sends, for matching a pre-approved plan
+    step. The texts themselves never leave the vault."""
+    return sorted(hashlib.sha256(_norm_text(t).encode()).hexdigest() for t in (texts or [])[:8] if _norm_text(t))
 
 
 async def _details(page, selector, label):
@@ -1201,6 +1245,10 @@ async def _details(page, selector, label):
     except Exception:
         d = {}
     d = {k: v for k, v in (d or {}).items() if v}
+    tds = _text_digests(d.pop("texts", None))
+    if tds:
+        d["text_digests"] = tds
+    d["path"] = urlparse(page.url).path or "/"
     d["label"] = (label or "")[:80]
     d["host"] = (urlparse(page.url).hostname or "").lower()   # for a pause on the exact address
     try:
@@ -1235,10 +1283,21 @@ async def _approve(page, label, site=None, details=None):
     if details:
         body["details"] = {**details, "label": details.get("label") or label[:80]}
     r = await asyncio.to_thread(agent.client.post, f"{agent.base}/api/v1/agent-approval", json=body)
+    if r.status_code == 409:
+        try:
+            jb = r.json()
+        except Exception:
+            jb = {}
+        if jb.get("error") == "plan_step_blocked":
+            # a step of the owner's plan that must not run (it depends on one
+            # that did not happen): no card, the rest of the plan carries on
+            raise NotApproved(f"{jb.get('detail')}. Not clicked; carry on with the plan's other steps.")
     if r.status_code != 200:
         raise RuntimeError(f"approval request refused: {r.status_code} {r.text[:200]}")
     j = r.json()
     txn = j["txn_id"]
+    if j.get("plan_id"):
+        PLAN_TXN[page] = txn             # the click's result is reported for this plan step
     shown = (details or {}).get("amount", "")
     # the summary names the address the owner saw, not the parent domain
     # the approval is filed under (demo.example.com, not example.com)
@@ -1267,6 +1326,23 @@ async def _approve(page, label, site=None, details=None):
 
 class NotApproved(Exception):
     pass
+
+
+PLAN_TXN = weakref.WeakKeyDictionary()     # page -> txn of the plan step it is about to click
+
+
+async def _plan_result(page, result):
+    """Tell the cloud what an approved plan step's click did, so steps chained
+    to it may run (done) or are skipped (failed / unknown)."""
+    txn = PLAN_TXN.pop(page, None)
+    if not txn:
+        return
+    agent = V.agent()
+    try:
+        await asyncio.to_thread(agent.client.post, f"{agent.base}/api/v1/plans/result", timeout=10, json={
+            "agent_id": agent.agent_id, "agent_jwt": agent._agent_jwt(), "txn_id": txn, "result": result})
+    except Exception as e:
+        _log("plan step result not sent:", type(e).__name__)
 
 
 class ResultUnknown(Exception):
@@ -1476,18 +1552,38 @@ async def _guarded(page, selector, label_of, act, submits_form):
                                  + f" here {'just now' if mins < 1 else f'{mins} min ago'}"
                                  + (", and the site never answered: it may already have gone through"
                                     if prev["unknown"] else ""))
+        PLAN_TXN.pop(page, None)
         result = await _approve(page, label, details=details)
         if result != "approved":
+            PLAN_TXN.pop(page, None)
             raise NotApproved(f"the owner did not approve '{label}' ({result})")
         # the page may have changed while the owner looked: an approval is for
         # what they were shown, so a different amount is a different action
         now = await _details(page, selector, label)
         if details.get("amount") and now.get("amount") != details.get("amount"):
+            await _plan_result(page, "failed")
             raise NotApproved(f"the amount changed after approval ({details['amount']} -> "
                               f"{now.get('amount') or 'none'}); not clicked. Ask again.")
+        # a pre-approved text: what is sent must still be what the owner approved
+        if details.get("text_digests") and now.get("text_digests") != details.get("text_digests"):
+            await _plan_result(page, "failed")
+            raise NotApproved("the text changed after approval; not clicked. Ask again.")
         if not money:
-            return await act()
-        ok = await _answered(page, act)
+            if page not in PLAN_TXN:
+                return await act()
+            try:
+                ok = await _answered(page, act)
+            except Exception:
+                await _plan_result(page, "failed")
+                raise
+            await _plan_result(page, "done" if ok else "unknown")
+            return
+        try:
+            ok = await _answered(page, act)
+        except Exception:
+            await _plan_result(page, "failed")
+            raise
+        await _plan_result(page, "done" if ok else "unknown")
         MONEY_LOG[site] = {"label": label, "amount": details.get("amount", ""), "t": time.time(),
                            "unknown": not ok, "read": False}
         if not ok:
