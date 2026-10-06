@@ -10,6 +10,9 @@ Modes, set by the owner in the app, per agent, with per-site exceptions:
          Only per site, never for all sites.
 
 Always asks, in every mode except as noted:
+  data        the agent opens an address it wrote itself that carries a lot
+              of data, which can send the owner's information to that site
+              (asks even in allow; the card warns)
   money       an amount on the form, card fields, or pay/buy/order wording
   delete      delete, remove, cancel, close account ...
   publish     post, send, comment, reply, share, invite ... (acts as the owner)
@@ -97,10 +100,13 @@ def words(label):
 
 
 def classify(label, details=None):
-    """(category, reason). Categories: money, delete, publish, security,
-    unknown, low."""
+    """(category, reason). Categories: data, money, delete, publish,
+    security, unknown, low."""
     d = details or {}
     w = words(d.get("label") or label)
+    if d.get("data_out"):
+        return "data", (f"the address carries {d['data_out']} characters of data to "
+                        f"{d.get('host') or 'another site'}")
     if not w or w.lower() in ("action", "submit form", "submit"):
         return "unknown", "the action has no clear wording"
     if d.get("card_fields"):
@@ -237,6 +243,8 @@ def decide(c, user_id, agent_id, site, label, details=None, now=None):
     if mode == "ask":
         return False, f"Ask mode ({scope})"
     if mode == "off":
+        if cat == "data":
+            return False, f"Allow ({scope}), but {reason}: always asks"
         if cat == "security":
             return False, f"Allow ({scope}), but {reason}: always asks"
         return True, f"Allow mode on {scope}: {reason}" if cat == "low" else f"Allow mode on {scope}"
@@ -271,7 +279,8 @@ def clean_details(d):
     if not isinstance(d, dict):
         return {}
     out = {}
-    for k, n in (("label", 80), ("amount", 40), ("item", 120), ("order", 60), ("page", 200), ("repeat", 240)):
+    for k, n in (("label", 80), ("amount", 40), ("item", 120), ("order", 60), ("page", 200), ("repeat", 240),
+                 ("data", 600)):
         v = d.get(k)
         if isinstance(v, str):
             v = re.sub(r"\s+", " ", plain(v)).strip()[:n]
@@ -291,6 +300,11 @@ def clean_details(d):
     for k in ("card_fields", "password_fields"):
         if d.get(k) is True:
             out[k] = True
+    # vault 0.3.30+: the agent is opening an address it wrote that carries
+    # this many characters of data; the card warns the owner
+    n = d.get("data_out")
+    if isinstance(n, int) and not isinstance(n, bool) and 0 < n <= 1_000_000:
+        out["data_out"] = n
     # plans (vault 0.3.25+): the page's path and digests of the form's texts,
     # compared exactly with a pre-approved step; never shown on the card
     pth = d.get("path")

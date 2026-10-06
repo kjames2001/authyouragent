@@ -376,6 +376,9 @@ def match(c, user_id, agent_id, site, details, now=None):
     # owner approved a click on this site, not a send to that one
     if modes.sends_elsewhere(site, d):
         return None
+    # nor is opening an address that carries data: it always asks
+    if d.get("data_out"):
+        return None
     got = d.get("text_digests")
     got = sorted(x for x in got if isinstance(x, str) and HEX64.match(x)) if isinstance(got, list) else None
     for p in c.execute("SELECT * FROM plans WHERE user_id=? AND agent_id=? AND status IN ('approved','pending') "

@@ -2,6 +2,13 @@
 
 Every release of the Python SDK, MCP server and browser vault (`authyouragent` on PyPI, `ghcr.io/kjames2001/authyouragent-vault`), with the changes to the service at authyouragent.com that shipped alongside it. Newest first. Versions are tagged `py-vX.Y.Z` (PyPI) and `js-vX.Y.Z` (npm).
 
+## 0.3.30 (2026-10-06)
+
+### The card says when opening an address is unsafe
+- The card for an address that carries data now opens with a red warning, straight under the title: "Possibly unsafe: deny unless you asked for this", with how much data goes to which site and why that is how a page tricks an agent. Before, it looked like any other approval, and an owner approved it.
+- The card shows all the data (up to 600 characters) under its own "Data" line, and the phone notification says the same instead of "Tap to approve".
+- Opening such an address always asks: Allow mode and Smart mode do not let it through, and a pre-approved plan step never covers it.
+
 ## 0.3.29 (2026-10-06)
 
 ### Pages cannot hide instructions for the agent

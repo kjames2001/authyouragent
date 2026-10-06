@@ -1524,11 +1524,13 @@ async def navigate(request):
     carries = _carries(url)
     if carries and not await _link_on_page(page, url) and not _target_trusted(host, port):
         label = f"Open {host}"
-        # the card shows the start of the address itself, so the owner sees the data
-        shown = url.split("://", 1)[-1]
+        u = urlparse(url)
+        data = (unquote_plus(u.query) + unquote(u.fragment)) or max(
+            (unquote(s) for s in u.path.split("/")), key=len, default="")
+        # the card warns the owner (data_out) and shows the data itself
         result = await _approve(page, label, site=_site(host), details={
-            "label": label, "host": host,
-            "item": (f"It carries {carries}: {shown}")[:117] + ("..." if len(shown) > 60 else "")})
+            "label": label, "host": host, "data_out": len(data),
+            "data": data[:597] + ("..." if len(data) > 597 else "")})
         if result != "approved":
             return web.json_response({"error": "not_approved", "detail": (
                 f"the owner did not approve opening this address ({result}): it carries {carries}. "
