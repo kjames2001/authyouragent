@@ -585,7 +585,7 @@ async def request_approval(site: str, action: str, wait_seconds: int = 120,
 
 
 @mcp.tool()
-async def submit_plan(title: str, start: str, end: str, steps: list[dict]) -> str:
+async def submit_plan(title: str, start: str, end: str, steps: list[dict], runs: int = 1, every: str = "") -> str:
     """Ask your owner, once and in advance, to pre-approve the actions of a
     task that will run later while they may be away (a scheduled job).
     Call it when the job is set up, not when it runs. The owner gets one card
@@ -604,8 +604,16 @@ async def submit_plan(title: str, start: str, end: str, steps: list[dict]) -> st
        "path": "/r/x/submit",             # optional: exact path and query, or a prefix ending in *
        "after": ["s0"],                   # optional: steps that must be done first
        "uses": 1}                         # optional: times it may run, 1-5
+    runs, every: for a task that repeats (a daily check, a weekly post), ask
+      for exactly the runs you need: runs=7, every="day" repeats the window
+      (start to end) 7 times, a day apart. every is "day" or "week"; the last
+      run must end within 30 days of the first starting. Each step may go
+      through `uses` times per run. After the last run the approval is spent:
+      submit a new plan.
     Payments and security changes are listed for the owner but never
     pre-approved: they always ask at the time.
+    Read-only work (opening and reading pages, scrolling, searching) never
+    asks, so it needs no plan.
     Returns the plan id and status; check it later with plan_status."""
     agent = _get_agent()
 
@@ -621,6 +629,8 @@ async def submit_plan(title: str, start: str, end: str, steps: list[dict]) -> st
     try:
         body = {"agent_id": agent.agent_id, "agent_jwt": agent._agent_jwt(), "title": title,
                 "start_at": ts(start), "end_at": ts(end), "steps": steps}
+        if runs != 1 or every:
+            body.update(runs=int(runs), every=str(every))
         r = await asyncio.to_thread(agent.client.post, f"{agent.base}/api/v1/plans", json=body, timeout=15)
     except Exception as e:
         return f"error: {e}"
@@ -631,7 +641,9 @@ async def submit_plan(title: str, start: str, end: str, steps: list[dict]) -> st
             return f"error: server returned {r.status_code}"
     j = r.json()
     never = j.get("never_pre_approved") or []
-    return (f"submitted\nplan_id: {j['plan_id']}\nThe owner has a card to pre-approve it; they may answer "
+    rep = (f"\nRepeats: {j['runs']} runs, one a {j['every']}; the last ends at Unix {j['last_end']}."
+           if (j.get("runs") or 1) > 1 else "")
+    return (f"submitted\nplan_id: {j['plan_id']}{rep}\nThe owner has a card to pre-approve it; they may answer "
             "until the window opens. If they do not, every step asks at the time and the run still goes ahead."
             + (f"\nAlways asks at the time (payment or security): {', '.join(never)}" if never else ""))
 
@@ -651,6 +663,10 @@ async def plan_status(plan_id: str) -> str:
         return f"error: server returned {r.status_code}"
     p = r.json()
     lines = [f"{p['title']}: {p['status']} (card: {p['card']})"]
+    if (p.get("runs") or 1) > 1:
+        lines.append(f"Repeats: {p['runs']} runs, one a {p['every']}; "
+                     + (f"run {p['run']} is open now (steps below are this run's)" if p.get("run") else
+                        f"next run starts at Unix {p['next_start']}" if p.get("next_start") else "no runs left"))
     for i, s in enumerate(p["steps"], 1):
         how = "pre-approved" if s["pre_approved"] else "asks at the time"
         dep = f", after {', '.join(s['after'])}" if s["after"] else ""

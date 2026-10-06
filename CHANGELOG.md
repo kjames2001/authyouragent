@@ -2,6 +2,17 @@
 
 Every release of the Python SDK, MCP server and browser vault (`authyouragent` on PyPI, `ghcr.io/kjames2001/authyouragent-vault`), with the changes to the service at authyouragent.com that shipped alongside it. Newest first. Versions are tagged `py-vX.Y.Z` (PyPI) and `js-vX.Y.Z` (npm).
 
+## 0.3.28 (2026-10-06)
+
+### Plans can repeat, for an exact number of runs
+- `submit_plan` takes `runs` and `every` ("day" or "week"). The plan's window opens that many times, a day or a week apart, and the owner approves every run with one passkey tap. Each step may go through `uses` times per run.
+- Exactly the runs asked for, never more: the last run must end within 30 days of the first starting, and after it the approval is spent. The card says how many runs, how often, and when the last one ends.
+- `plan_status` says which run is open, or when the next one starts. The plan list in the app shows the same.
+- Everything else about plans holds for each run: the exact text, the address and button words, payments and security changes always asking, Google sign-in not approving.
+
+### "Off" is now called "Allow"
+- A site's approval mode reads Ask, Smart or Allow. Allow means nothing asks on that site, except account and security changes; it is still for one site at a time. Existing rules carry over unchanged, and an older app that sends "off" still works.
+
 ## 0.3.27 (2026-10-06)
 
 **An approval cannot be sent somewhere else**

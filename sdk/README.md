@@ -40,7 +40,7 @@ The `authyouragent-mcp` command starts an MCP server with twenty-two tools:
   `wait_for`, `screenshot`. Only public websites open. Anything that submits
   a form, or whose button says create, send, save, delete, pay and the like,
   waits for your approval on your phone.
-- **Approval modes** (in the app, per agent and site): Ask, Smart or Off.
+- **Approval modes** (in the app, per agent and site): Ask, Smart or Allow (one site at a time).
   Smart lets changes you can undo (save, filter, add to cart) through without
   asking; money, deleting, posting and account changes always ask. Rules
   only, no AI. The approval card shows the amount and item read from the
@@ -68,7 +68,9 @@ The `authyouragent-mcp` command starts an MCP server with twenty-two tools:
   pre-approved step exactly (address, button words, the exact text it posts)
   goes through without a card. A step you do not answer in time is skipped
   with the steps chained to it; the rest of the plan carries on. Payments and
-  security changes always ask.
+  security changes always ask. For a task that repeats, the agent asks for
+  an exact number of runs (`runs`, `every` = day or week, all within 30 days);
+  one approval covers exactly those runs and no more.
 - **`end_session`**: sign out of every site used, then destroy the browser
   profile. Always called at the end. The vault then sends you its own summary
   of the session, whether or not the agent sent a note.

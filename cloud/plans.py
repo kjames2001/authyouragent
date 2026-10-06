@@ -11,6 +11,11 @@ A step the owner does not answer in time, or denies, is skipped; steps
 chained to it ("after") are refused without a card; the other steps carry
 on. Payments and security changes are never pre-approved.
 
+A plan may repeat: the agent asks for an exact number of runs, one a day or
+one a week, and the owner approves them all at once. The window opens once
+per run, each step may go through `uses` times per run, and no run starts
+more than 30 days after the first: one approval never covers more.
+
 No model judges anything here: matching is exact comparison.
 """
 import hashlib
@@ -26,6 +31,9 @@ MAX_STEPS = 20
 MAX_USES = 5
 MAX_WINDOW = 24 * 3600          # a plan's window is at most a day
 MAX_AHEAD = 30 * 86400          # and starts within 30 days
+EVERY = {"day": 86400, "week": 7 * 86400}   # how often a repeating plan runs
+MAX_SPAN = 30 * 86400           # its last run ends within 30 days of the first starting
+MAX_RUNS = 30
 MAX_TEXT = 10000                # characters per text the agent submits
 MAX_TEXTS = 4                   # text fields per step (a title and a body, say)
 NEVER = ("money", "security")   # always ask, even inside a plan
@@ -75,10 +83,55 @@ def migrate(c):
       reason TEXT, last_txn TEXT, updated_at INTEGER,
       PRIMARY KEY(plan_id, step))""")
     c.execute("CREATE INDEX IF NOT EXISTS plans_agent ON plans(agent_id, status)")
+    # repeating plans (0.3.28): runs windows, every_s apart; last_end is
+    # the end of the last one. A one-off plan is runs=1, every_s=0.
+    cols = {r[1] for r in c.execute("PRAGMA table_info(plans)")}
+    for col, decl in (("runs", "INTEGER NOT NULL DEFAULT 1"), ("every_s", "INTEGER NOT NULL DEFAULT 0"),
+                      ("last_end", "INTEGER")):
+        if col not in cols:
+            c.execute(f"ALTER TABLE plans ADD COLUMN {col} {decl}")
+    c.execute("UPDATE plans SET last_end=end_at WHERE last_end IS NULL")
+    if "run" not in {r[1] for r in c.execute("PRAGMA table_info(plan_steps)")}:
+        c.execute("ALTER TABLE plan_steps ADD COLUMN run INTEGER NOT NULL DEFAULT 0")
 
 
 def _err(msg) -> NoReturn:
     raise ValueError(msg)
+
+
+def parse_repeat(body, start, end):
+    """(runs, every_s) from the agent's "runs" and "every". Raises ValueError."""
+    try:
+        runs = int(body.get("runs") or 1)
+    except (TypeError, ValueError):
+        _err("runs: a whole number")
+    every = str(body.get("every") or "").strip().lower()
+    if runs == 1 and not every:
+        return 1, 0
+    if every not in EVERY:
+        _err("every: day or week (a repeating plan needs both runs and every)")
+    every_s = EVERY[every]
+    if not 1 <= runs <= MAX_RUNS:
+        _err(f"runs: 1 to {MAX_RUNS}")
+    if end - start >= every_s:
+        _err(f"each run's window must be shorter than a {every}")
+    if start + (runs - 1) * every_s + (end - start) - start > MAX_SPAN:
+        most = (MAX_SPAN - (end - start)) // every_s + 1
+        _err(f"the last run must end within 30 days of the first starting: at most {most} runs a {every}")
+    return runs, every_s
+
+
+def window(p, now=None):
+    """(run index, its start, its end) of the run open at `now`, or None."""
+    now = now or int(time.time())
+    every = p["every_s"] or 0
+    if now < p["start_at"]:
+        return None
+    k = (now - p["start_at"]) // every if every else 0
+    if k >= (p["runs"] or 1):
+        return None
+    ws, we = p["start_at"] + k * every, p["end_at"] + k * every
+    return (k, ws, we) if ws <= now < we else None
 
 
 def parse(body, norm_site, now=None):
@@ -150,11 +203,13 @@ def parse(body, norm_site, now=None):
     return title, start, end, steps
 
 
-def create(c, user_id, agent_id, title, start, end, steps, txn_id):
+def create(c, user_id, agent_id, title, start, end, steps, txn_id, runs=1, every_s=0):
     pid = "p_" + secrets.token_hex(8)
     now = int(time.time())
-    c.execute("INSERT INTO plans(id,user_id,agent_id,title,start_at,end_at,status,txn_id,created_at) "
-              "VALUES(?,?,?,?,?,?,'pending',?,?)", (pid, user_id, agent_id, title, start, end, txn_id, now))
+    c.execute("INSERT INTO plans(id,user_id,agent_id,title,start_at,end_at,status,txn_id,created_at,"
+              "runs,every_s,last_end) VALUES(?,?,?,?,?,?,'pending',?,?,?,?,?)",
+              (pid, user_id, agent_id, title, start, end, txn_id, now, runs, every_s,
+               end + (runs - 1) * every_s))
     for s in steps:
         c.execute("INSERT INTO plan_steps(plan_id,step,pos,site,host,path,label,category,texts,digests,after,"
                   "uses,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -169,7 +224,12 @@ def card(c, txn_id):
     if not p:
         return None
     return {"id": p["id"], "title": p["title"], "start_at": p["start_at"], "end_at": p["end_at"],
-            "steps": [_step_out(r, with_text=True) for r in _steps(c, p["id"])]}
+            **_repeat_out(p), "steps": [_step_out(r, with_text=True) for r in _steps(c, p["id"])]}
+
+
+def _repeat_out(p):
+    every = {v: k for k, v in EVERY.items()}.get(p["every_s"] or 0)
+    return {"runs": p["runs"] or 1, "every": every, "last_end": p["last_end"] or p["end_at"]}
 
 
 def _steps(c, pid):
@@ -231,7 +291,7 @@ def status(c, pid, agent_id=None, user_id=None, now=None):
 
 def list_for(c, user_id, agent_id=None, now=None):
     now = now or int(time.time())
-    q, a = "SELECT * FROM plans WHERE user_id=? AND end_at>?", [user_id, now - 7 * 86400]
+    q, a = "SELECT * FROM plans WHERE user_id=? AND last_end>?", [user_id, now - 7 * 86400]
     if agent_id:
         q, a = q + " AND agent_id=?", a + [agent_id]
     out = []
@@ -244,12 +304,19 @@ def list_for(c, user_id, agent_id=None, now=None):
 def _plan_out(c, p, now=None):
     now = now or int(time.time())
     st = p["status"]
-    if st == "pending" and now > p["end_at"]:
+    last = p["last_end"] or p["end_at"]
+    if st == "pending" and now > last:
         st = "unanswered"
-    elif st in ("approved", "pending") and now > p["end_at"]:
+    elif st in ("approved", "pending") and now > last:
         st = "finished"
+    out = {}
+    if (p["runs"] or 1) > 1:
+        w = window(p, now)
+        k = w[0] if w else min((max(now - p["start_at"], 0) + (p["every_s"] - 1)) // p["every_s"], p["runs"])
+        out = {"run": (w[0] + 1) if w else None,
+               "next_start": None if w or k >= p["runs"] else p["start_at"] + k * p["every_s"]}
     return {"id": p["id"], "agent_id": p["agent_id"], "title": p["title"], "start_at": p["start_at"],
-            "end_at": p["end_at"], "status": st,
+            "end_at": p["end_at"], **_repeat_out(p), **out, "status": st,
             "card": "approved" if p["status"] == "approved" else
                     "not answered: every step asks at the time" if p["status"] == "pending" else p["status"],
             "steps": [_step_out(r) for r in _steps(c, p["id"])]}
@@ -258,8 +325,13 @@ def _plan_out(c, p, now=None):
 # ------------------------------------------------------------------ run time
 
 def _refresh(c, p, now=None):
-    """A step whose card closed unanswered is skipped."""
+    """A new run of a repeating plan starts every step afresh. A step whose
+    card closed unanswered is skipped."""
     now = now or int(time.time())
+    w = window(p, now)
+    if w and any(r["run"] != w[0] for r in _steps(c, p["id"])):
+        c.execute("UPDATE plan_steps SET run=?, used=0, state='waiting', reason=NULL, last_txn=NULL, "
+                  "updated_at=? WHERE plan_id=?", (w[0], now, p["id"]))
     for r in _steps(c, p["id"]):
         if r["state"] != "asking" or not r["last_txn"]:
             continue
@@ -307,7 +379,9 @@ def match(c, user_id, agent_id, site, details, now=None):
     got = d.get("text_digests")
     got = sorted(x for x in got if isinstance(x, str) and HEX64.match(x)) if isinstance(got, list) else None
     for p in c.execute("SELECT * FROM plans WHERE user_id=? AND agent_id=? AND status IN ('approved','pending') "
-                       "AND start_at<=? AND end_at>? ORDER BY created_at", (user_id, agent_id, now, now)).fetchall():
+                       "AND start_at<=? AND last_end>? ORDER BY created_at", (user_id, agent_id, now, now)).fetchall():
+        if not window(p, now):          # between two runs of a repeating plan
+            continue
         _refresh(c, p, now)
         rows = {r["step"]: r for r in _steps(c, p["id"])}
         for r in rows.values():

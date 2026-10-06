@@ -172,9 +172,12 @@ def set_pause_scope(c, user_id, agent_id, scope):
 
 
 def set_mode(c, user_id, agent_id, site, mode, hourly_limit=None):
-    """site "*" = all sites. mode None removes a site exception."""
+    """site "*" = all sites. mode None removes a site exception. "allow" is
+    the app's name for the stored mode "off" (renamed in 0.3.28)."""
+    if mode == "allow":
+        mode = "off"
     if site == "*" and mode == "off":
-        raise ValueError("Off can only be set for one site at a time")
+        raise ValueError("Allow can only be set for one site at a time")
     if mode is None:
         if site == "*":
             raise ValueError("choose a mode for all sites")
@@ -182,7 +185,7 @@ def set_mode(c, user_id, agent_id, site, mode, hourly_limit=None):
                   (user_id, agent_id, site))
         return
     if mode not in MODES:
-        raise ValueError("mode must be ask, smart or off")
+        raise ValueError("mode must be ask, smart or allow")
     lim = int(hourly_limit or DEFAULT_LIMIT)
     if not 1 <= lim <= MAX_LIMIT:
         raise ValueError(f"the hourly limit must be 1 to {MAX_LIMIT}")
@@ -235,8 +238,8 @@ def decide(c, user_id, agent_id, site, label, details=None, now=None):
         return False, f"Ask mode ({scope})"
     if mode == "off":
         if cat == "security":
-            return False, f"Off ({scope}), but {reason}: always asks"
-        return True, f"Off mode on {scope}: {reason}" if cat == "low" else f"Off mode on {scope}"
+            return False, f"Allow ({scope}), but {reason}: always asks"
+        return True, f"Allow mode on {scope}: {reason}" if cat == "low" else f"Allow mode on {scope}"
     # smart
     if cat != "low":
         return False, f"Smart ({scope}): {reason}, so it asks"

@@ -32,7 +32,7 @@ The phone app and the approval service run at authyouragent.com. The agent signs
 | `wait_for_takeover` | Keep waiting after `waiting`. |
 | `request_approval` | Ask the owner to approve an action. `approved`, `denied` or `expired`. |
 | `notify_owner` | A one-way note to the owner's phone: done, stuck, or what failed. Nothing to approve. |
-| `submit_plan`, `plan_status` | For a scheduled task: the owner pre-approves its steps once; matching clicks then go through without a card. A step not answered in time is skipped with the steps chained to it; the rest carries on. |
+| `submit_plan`, `plan_status` | For a scheduled task: the owner pre-approves its steps once; matching clicks then go through without a card. A step not answered in time is skipped with the steps chained to it; the rest carries on. A repeating task asks for an exact number of runs, a day or a week apart, within 30 days. |
 | `end_session` | Sign out of every site used, then destroy the browser profile. Reports per site whether sign-out was confirmed. The vault then sends the owner its own summary of the session. |
 | `check_agent_status` | `active` or `revoked`. |
 | `report_site` | Report a site where take over did not work. |
