@@ -35,6 +35,25 @@ The vault needs Docker. `vault up` starts it on `127.0.0.1:7801` with every prot
 
 `AYA_AGENT_ID` and the key come from adding the agent in the app (**Agents → Add an agent**). Node-based clients can use `npx authyouragent-mcp` instead of `authyouragent-mcp`.
 
+### The vault on another machine
+
+By default the vault answers only on the machine it runs on. An agent that runs as root, or as the same user, on that machine can read the vault's files: the password manager login, the agent key and the token. The vault keeps passwords out of what the agent is shown, which stops a tricked agent; it does not stop an agent that goes looking on its own machine. To keep those files away from the agent, run the vault on a machine the agent cannot log in to, and connect over the network:
+
+```sh
+# on the vault's machine, over a VPN such as Tailscale or WireGuard (the VPN encrypts it):
+authyouragent vault up --agent-id ag_... --key agent.pem --listen 100.101.102.103
+# or with TLS on any address (a self-signed certificate is made and kept):
+authyouragent vault up --agent-id ag_... --key agent.pem --listen 192.168.1.20 --tls
+authyouragent vault env     # what to copy to the agent's machine
+```
+
+On the agent's machine, set `AYA_VAULT_URL` to the address `vault env` prints, `AYA_VAULT_TOKEN_FILE` to a copy of the token, `AYA_VAULT_AUTOSTART=0`, and with TLS `AYA_VAULT_CA_FILE` to a copy of the certificate. Check that the certificate's SHA-256 matches the one `vault up` printed. `--tls-name` adds the names the agent connects by (needed with `--listen 0.0.0.0`); `--tls-cert` and `--tls-key` use your own certificate instead.
+
+- Plain HTTP is accepted only on VPN and private addresses (10/8, 172.16/12, 192.168/16, 100.64/10, IPv6 ULA). Anything else needs `--tls`, and the MCP server refuses to send the token in clear text to any other address.
+- The API stays on `127.0.0.1:7801` too, for `vault status` and `vault down`.
+- The token can drive the browser, so keep it private on both machines. It never reveals a saved password: `fill_secret` types the value inside the vault.
+- The vault's machine must be one the agent cannot reach as an administrator. A container or LXC on a host the agent manages does not count, because the host's root can read it.
+
 The agent gets twenty-three tools:
 
 | Tool | Purpose |

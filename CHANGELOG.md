@@ -2,6 +2,15 @@
 
 Every release of the Python SDK, MCP server and browser vault (`authyouragent` on PyPI, `ghcr.io/kjames2001/authyouragent-vault`), with the changes to the service at authyouragent.com that shipped alongside it. Newest first. Versions are tagged `py-vX.Y.Z` (PyPI) and `js-vX.Y.Z` (npm).
 
+## 0.3.31 (2026-10-06)
+
+### The vault on another machine
+- `authyouragent vault up --listen ADDRESS` also serves the vault's API to other machines: plain HTTP on a VPN or private address (Tailscale, WireGuard, LAN), or with `--tls` on any address, on port 7443 with a self-signed certificate made and kept for the names given (`--tls-name`), or your own (`--tls-cert`, `--tls-key`). A public address without `--tls` is refused, so the token never crosses the internet in clear text.
+- `vault env` prints the settings for the agent's machine: the address, where to put the token and the certificate, and the certificate's SHA-256 to compare.
+- The MCP server takes `AYA_VAULT_CA_FILE` for the vault's certificate, and refuses to send the token over plain HTTP to anything but this machine or a VPN / private address.
+- The vault checks the token in constant time.
+- Why: an agent running as root on the vault's own machine can read the vault's files. Running the vault on a machine the agent cannot administer keeps the password manager login and the agent key away from it. See "The vault on another machine" in the agent guide.
+
 ## 0.3.30 (2026-10-06)
 
 ### The card says when opening an address is unsafe

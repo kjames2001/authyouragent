@@ -58,10 +58,14 @@ authyouragent vault env      # print the env block again
 ## Known limits
 
 - **Who can read the session.** Anyone with root or Docker access on the
-  machine running the vault can read the browser's memory. Run the vault where
-  the agent has neither: a separate VM, LXC or machine, reached over the network.
-  If the agent runs as root on the same host, the vault still stops casual
-  cookie theft by the agent's tools, but not a determined root process.
+  machine running the vault can read the browser's memory and the vault's
+  files (password manager login, agent key, token). Run the vault where the
+  agent has neither: a separate machine the agent cannot log in to as an
+  administrator, reached over a VPN or TLS (`vault up --listen ADDRESS
+  [--tls]`; see "The vault on another machine" in the agent guide). A VM or
+  LXC on a host the agent administers does not count. If the agent runs as
+  root on the same host, the vault still keeps passwords out of what the agent
+  is shown, but not away from a determined root process.
 - **Hard kills.** If the vault is killed before it can sign out, the cookies
   are gone with the in-memory profile, but the sessions stay valid on the
   sites' side until they expire. The vault keeps a list of site names (never

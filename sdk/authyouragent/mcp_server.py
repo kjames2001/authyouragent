@@ -19,6 +19,9 @@ Environment:
   AYA_VAULT_TOKEN_FILE  file holding the vault's bearer token (or AYA_VAULT_TOKEN)
   AYA_VAULT_AUTOSTART   default 1: start the local vault (Docker) on first use if
                         it is not running. Set 0 to manage it with `authyouragent vault`.
+  AYA_VAULT_CA_FILE     a vault on another machine over TLS: its certificate (PEM),
+                        from `authyouragent vault env` there. A vault elsewhere must be
+                        https, or http on a VPN / private address.
 
 Tools: navigate, read_page, click, type_text, press_key, select_option, scroll,
        go_back, wait_for, screenshot, check_login_wall, list_secrets, fill_secret,
@@ -120,6 +123,35 @@ async def _ensure_vault():
         _vault = None
 
 
+def _vault_verify(url):
+    """TLS settings for the vault address, and a refusal to send the token in
+    clear text: plain http only to this machine or a VPN / private address."""
+    import ipaddress
+    import ssl
+    from . import vault_cli
+    u = urlparse(url)
+    if u.scheme == "https":
+        ca = os.environ.get("AYA_VAULT_CA_FILE")
+        if ca:
+            ctx = ssl.create_default_context(cafile=os.path.expanduser(ca))
+            return ctx
+        return True
+    if u.scheme != "http":
+        raise RuntimeError(f"AYA_VAULT_URL must be http:// or https://, not {url}")
+    host = (u.hostname or "").strip("[]")
+    if host == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        raise RuntimeError(f"AYA_VAULT_URL {url}: plain http needs an IP address on a VPN or this machine; "
+                           "use https:// with AYA_VAULT_CA_FILE for a host name")
+    if ip.is_loopback or any(ip in n for n in vault_cli.VPN_NETS):
+        return True
+    raise RuntimeError(f"AYA_VAULT_URL {url}: the vault token would cross the internet in clear text. "
+                       "Use https:// (`authyouragent vault up --listen ... --tls`) or a VPN address.")
+
+
 def _vault_client():
     global _vault
     if _vault is None:
@@ -133,9 +165,9 @@ def _vault_client():
                 token = open(default).read().strip()
         if not token:
             raise NoVaultToken("no vault token: run `authyouragent vault up`, or set AYA_VAULT_TOKEN_FILE")
-        _vault = httpx.AsyncClient(base_url=os.environ.get("AYA_VAULT_URL", "http://127.0.0.1:7801"),
-                                   headers={"Authorization": f"Bearer {token}"},
-                                   timeout=httpx.Timeout(60, read=WAIT_MAX + 30))
+        url = os.environ.get("AYA_VAULT_URL", "http://127.0.0.1:7801")
+        _vault = httpx.AsyncClient(base_url=url, headers={"Authorization": f"Bearer {token}"},
+                                   verify=_vault_verify(url), timeout=httpx.Timeout(60, read=WAIT_MAX + 30))
     return _vault
 
 

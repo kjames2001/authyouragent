@@ -27,10 +27,12 @@ Environment:
 import asyncio
 import base64
 import hashlib
+import hmac
 import json
 import os
 import re
 import shutil
+import ssl
 import tempfile
 import time
 import unicodedata
@@ -1469,7 +1471,8 @@ V = Vault()
 # ── HTTP API ──
 @web.middleware
 async def auth(request, handler):
-    if request.headers.get("Authorization") != f"Bearer {TOKEN}":
+    # constant time: the API can be reachable from other machines (VPN/TLS)
+    if not hmac.compare_digest(request.headers.get("Authorization", "").encode(), f"Bearer {TOKEN}".encode()):
         return web.json_response({"error": "unauthorized"}, status=401)
     V.last_ping = time.time()
     try:
@@ -2615,9 +2618,44 @@ async def save_secret(request):
     return web.json_response({"ok": True, "name": name, "site": url})
 
 
+TLS_PORT = 7443
+
+
+async def start_tls(app):
+    """With VAULT_TLS_CERT/VAULT_TLS_KEY, also serve the API over TLS on 7443,
+    for an agent on another machine (`vault up --listen ADDR --tls`). Plain
+    7801 stays, published on the host's loopback only (or on a VPN address)."""
+    cert, key = os.environ.get("VAULT_TLS_CERT"), os.environ.get("VAULT_TLS_KEY")
+    if not cert:
+        return
+    ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.load_cert_chain(cert, key)
+    tls_app = web.Application(middlewares=[auth])
+    tls_app.add_routes(ROUTES)
+    runner = web.AppRunner(tls_app)
+    await runner.setup()
+    await web.TCPSite(runner, "0.0.0.0", TLS_PORT, ssl_context=ctx).start()
+    app["tls"] = runner
+    _log(f"API also on TLS port {TLS_PORT}")
+
+
+async def stop_tls(app):
+    if "tls" in app:
+        await app["tls"].cleanup()
+
+
 def main():
     app = web.Application(middlewares=[auth])
-    app.add_routes([
+    app.add_routes(ROUTES)
+    app.on_startup.append(on_startup)
+    app.on_startup.append(start_tls)
+    app.on_cleanup.append(stop_tls)
+    app.on_cleanup.append(on_cleanup)
+    web.run_app(app, host="0.0.0.0", port=7801, print=None)
+
+
+ROUTES = [
         web.get("/status", status), web.post("/ping", ping),
         web.post("/navigate", navigate), web.post("/click", click),
         web.post("/type", type_text), web.get("/read", read),
@@ -2628,10 +2666,7 @@ def main():
         web.post("/end_session", end_session),
         web.post("/press", press), web.post("/select", select), web.post("/scroll", scroll),
         web.post("/back", back), web.post("/wait", wait_for), web.get("/screenshot", screenshot),
-    ])
-    app.on_startup.append(on_startup)
-    app.on_cleanup.append(on_cleanup)
-    web.run_app(app, host="0.0.0.0", port=7801, print=None)
+]
 
 
 if __name__ == "__main__":
