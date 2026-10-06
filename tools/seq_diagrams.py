@@ -83,7 +83,8 @@ TAKEOVER = build("seqt2",
     ("Your phone", "Website", "4. you type and tap on the live page", ""),
     ("Website", "Your phone", "site sees a normal human sign-in", ""),
     ("Your phone", "Agent", "5. you finish: browser handed back automatically", ""),
-    ("Agent", "Website", "6. agent continues on the logged-in page; risky clicks ask your phone first", "note"),
+    ("Agent", "Website", "6. agent continues on the logged-in page; clicks follow your approval mode", "note"),
+    ("Your phone", "Agent", "offer: save this sign-in to your password manager", ""),
     ("Agent", "Auth Your Agent", "7. done: vault signs you out", ""),
 ])
 
@@ -98,10 +99,26 @@ SAVED = build("seqt3",
     ("Vault", "Bitwarden / Vaultwarden", "4. sync, decrypt on your machine", ""),
     ("Vault", "Website", "5. types the password or code into the field", "key"),
     ("Vault", "Agent", "6. \u201cfilled\u201d \u2014 never the value", ""),
+    ("Vault", "Bitwarden / Vaultwarden", "your phone is told: saved sign-in used on this site", "note"),
     ("Agent", "Website", "7. agent submits; sign-ins it can't fill go to take over", "note"),
 ], lanes=[("Agent", 90, 96), ("Vault", 330, 150), ("Bitwarden / Vaultwarden", 560, 196), ("Website", 770, 96)])
 
-DIAGRAMS = {"seqt": APPROVAL, "seqt2": TAKEOVER, "seqt3": SAVED}
+PLAN = build("seqt4",
+    "Scheduled plan sequence: when a task is set up, the agent submits a plan with the exact steps and text. You "
+    "approve it once with your passkey. Later, while you are away, each click that matches a step exactly goes "
+    "through without asking; anything else, and every payment, still asks your phone.", [
+    ("Agent", "Auth Your Agent", "1. submit_plan: when, how many runs, each step's exact text", ""),
+    ("Auth Your Agent", "Your phone", "2. one card: every step, the full text, the runs", ""),
+    ("Your phone", "Auth Your Agent", "approved once, with your passkey", "key"),
+    ("Agent", "Website", "later, while you are away: a run starts", "note"),
+    ("Agent", "Vault", "3. click \u201cPost\u201d", ""),
+    ("Vault", "Auth Your Agent", "page, button, hash of the text it sends", ""),
+    ("Auth Your Agent", "Vault", "matches a step exactly: go", "key"),
+    ("Vault", "Website", "4. clicks; summary to your phone at the end", ""),
+    ("Agent", "Website", "a changed word, another page, a payment: asks your phone", "note"),
+], lanes=[("Agent", 90, 96), ("Vault", 270, 96), ("Auth Your Agent", 470, 150), ("Your phone", 640, 112), ("Website", 790, 96)])
+
+DIAGRAMS = {"seqt": APPROVAL, "seqt2": TAKEOVER, "seqt3": SAVED, "seqt4": PLAN}
 
 if __name__ == "__main__":
     s = HOME.read_text()

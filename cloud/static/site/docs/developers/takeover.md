@@ -85,21 +85,22 @@ Every click that commits something (buy, post, delete, submit a form) waits for 
 |---|---|
 | **Ask** (default) | Every committing click. |
 | **Smart** | Only what matters. Changes the owner can undo in a click go through without asking: save, update settings, filter or sort, add to cart or a list, archive, mark as read, star, pin. Up to an hourly limit per site (20 by default, up to 200). |
-| **Off** | Nothing on that site, except account and security changes. Only per site, never for all sites. |
+| **Allow** | Nothing on that site, except account and security changes. Only per site, never for all sites. (Called Off before 0.3.28.) |
 
 Whatever the mode, these always ask:
 
 - **money**: an amount on the button's form, card-number fields, or pay, buy, order, subscribe and similar wording;
 - **deleting**: delete, remove, cancel, close, revoke;
-- **acting as the owner**: post, send, comment, reply, share, invite, merge, deploy;
-- **account and security**: password, email, two-factor, keys, permissions (these ask even on an Off site);
+- **acting as the owner**: post, send, comment, reply, share, invite, merge, deploy, and any click that sends text typed into the page, whatever its button says (old Reddit's comment button reads "save");
+- **another site**: a form that sends to a different site from the page it is on (the card shows "Sends to");
+- **account and security**: password, email, two-factor, keys, permissions (these ask even on an Allow site);
 - **anything unclear**: an unlabelled button, or wording that is not on the low-risk list.
 
 Smart also pauses for an hour after the owner denies something. The owner chooses what a deny pauses: the **whole domain** (the default: a deny on shop.example.com also pauses example.com and its other addresses) or **that exact address only** (just shop.example.com). Vaults before 0.3.20 do not send the exact address, so for them a deny always pauses the whole domain.
 
 **Rules only.** Modes decide from the button's words, the form's fields, any amount, the site and the limits. There is no model involved, so every decision can be explained, and nothing a page says can talk its way past them. The agent cannot change its own mode: only the owner, signed in to the app, can.
 
-**The approval card shows what the vault read from the page:** the amount, item and order number from the button's own form or section (not a total elsewhere on the page). Each approval is for that one action, works once, and expires after five minutes. If the amount changes between the approval and the click, the vault does not click and asks again. Activity lists every card with what it showed, every action that went through without asking and why, and every change of mode.
+**The approval card shows what the vault read from the page:** the amount, item and order number from the button's own form or section (not a total elsewhere on the page). Each approval is for that one action, works once, and expires after five minutes. After the owner taps, the vault reads the amount, the text, the page's address and where the form sends once more; if any of them changed since the card, it does not click and asks again. Activity lists every card with what it showed, every action that went through without asking and why, and every change of mode.
 
 For the agent nothing changes: the click returns when it is approved, by the owner or by their mode, and fails with `the owner did not approve` otherwise.
 
@@ -133,6 +134,7 @@ submit_plan(
 - **Exact match, rules only.** During the window, a click goes through without a card only if it is this agent's, on the step's https address (and path with its query, if given), with the same button words and the same text (none, if the step gives none): the vault reads the form's fields at click time and sends only a SHA-256 of each, which must equal the text the owner read. Order, trailing spaces and line endings do not count; a changed word does. If the text changes after approval, the vault does not click. Each step runs at most `uses` times (default 1).
 - **A step that does not happen does not stop the plan.** If the owner does not answer a step's card in time, or denies it, or the click fails or gets no answer from the site, that step is skipped, and so is every step that names it in `after`. Those are refused at once without a card ("skipped: step 2 depends on step 1, which was not approved in time"). Every other step carries on.
 - **Always asks.** Payments and anything with an amount, and account or security changes, are listed on the card but never pre-approved.
+- **Repeating tasks.** Add `runs` and `every` (`day` or `week`) to repeat the window: `runs: 7, every: "day"` is seven runs, a day apart, all approved with one tap. Each run starts afresh, and each step may go through `uses` times per run. The agent gets exactly the runs it asked for: the last must end within 30 days of the first starting (up to 30 daily or 5 weekly runs), and after it the approval is spent. The card shows the number of runs, how often, and when the last one ends; `plan_status` says which run is open or when the next one starts.
 - **Limits.** A window is 1 minute to 24 hours and starts within 30 days; at most 20 steps; each text up to 10,000 characters. Steps whose button words could mean anything ("Submit", "Continue") need the exact `path`. The owner can withdraw a plan in the app (Agents, approval modes) at any time.
 - `plan_status(plan_id)` lists each step: pre-approved or not, and `waiting`, `asking`, `running`, `done`, `skipped`, `denied`, `failed` or `unknown`, with the reason.
 
@@ -141,7 +143,7 @@ submit_plan(
 The vault's rules suit most sites. For a site the owner uses all the time, or a service on their own network, they can relax them:
 
 ```bash
-authyouragent vault trust example.com --no-approvals     # clicks on example.com stop asking each time (or set Off for the site in the app)
+authyouragent vault trust example.com --no-approvals     # clicks on example.com stop asking each time (or set Allow for the site in the app)
 authyouragent vault trust 192.168.1.20:8123 --private    # the browser may open this host on your own network
 authyouragent vault trust                                # list
 authyouragent vault trust example.com --remove
