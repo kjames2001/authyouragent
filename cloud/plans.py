@@ -28,10 +28,9 @@ MAX_WINDOW = 24 * 3600          # a plan's window is at most a day
 MAX_AHEAD = 30 * 86400          # and starts within 30 days
 MAX_TEXT = 10000                # characters per text the agent submits
 MAX_TEXTS = 4                   # text fields per step (a title and a body, say)
-PREVIEW = 600                   # characters of each text kept for the card
 NEVER = ("money", "security")   # always ask, even inside a plan
 STEP_ID = re.compile(r"^[a-z0-9_-]{1,24}$")
-PATH_RE = re.compile(r"^/[\x21-\x7e]{0,300}$")
+PATH_RE = re.compile(r"^/[\x21-\x7e]{0,300}$")   # path and query (?id=1); a trailing * is a prefix
 
 
 def norm_text(s):
@@ -110,7 +109,7 @@ def parse(body, norm_site, now=None):
             _err(f"step {i + 1}: id must be unique, [a-z0-9_-], up to 24 characters")
         seen.add(sid)
         url = str(s.get("url") or "").strip()
-        m = re.match(r"^https?://([^/?#]+)(/[^?#]*)?", url, re.I)
+        m = re.match(r"^https://([^/?#]+)(/[^?#]*)?", url, re.I)
         if m is None:
             _err(f"step {sid}: url must be the page's https address")
         host = m.group(1).rsplit("@", 1)[-1].split(":")[0].lower()
@@ -118,7 +117,8 @@ def parse(body, norm_site, now=None):
             _err(f"step {sid}: not a valid address")
         path = (s.get("path") or "").strip() or None      # optional exact path, or prefix ending in *
         if path is not None and not PATH_RE.match(path):
-            _err(f"step {sid}: path must start with / (a trailing * matches anything after it)")
+            _err(f"step {sid}: path must start with /; it may include the query (/items?id=1), "
+                 "and a trailing * matches anything after it")
         label = re.sub(r"\s+", " ", modes.plain(s.get("button") or "")).strip()
         if not 1 <= len(label) <= 80:
             _err(f"step {sid}: button: the button's words, 1 to 80 characters")
@@ -144,7 +144,7 @@ def parse(body, norm_site, now=None):
             _err(f"step {sid}: uses 1 to {MAX_USES}")
         steps.append({"step": sid, "pos": i, "site": norm_site(site_of(host)), "host": host.removeprefix("www."),
                       "path": path, "label": label, "category": cat,
-                      "texts": [norm_text(t)[:PREVIEW] for t in texts],
+                      "texts": [norm_text(t) for t in texts],     # the card shows all of it
                       "digests": sorted(digest(t) for t in texts),
                       "after": [str(a).lower() for a in after], "uses": uses})
     return title, start, end, steps
@@ -292,8 +292,8 @@ def match(c, user_id, agent_id, site, details, now=None):
     of any plan) or a dict:
       {"plan", "step", "title", "pre": bool, "blocked": reason or None}
     Matching is exact: same agent, open window, approved or unanswered plan,
-    same site and address, same button words, same path rule, and for text
-    steps the same set of texts."""
+    same site and address, same button words, same path rule (path and
+    query), and the same set of texts (none if the step was given none)."""
     now = now or int(time.time())
     d = details or {}
     host = (d.get("host") or "").lower().removeprefix("www.")
@@ -307,12 +307,13 @@ def match(c, user_id, agent_id, site, details, now=None):
         _refresh(c, p, now)
         rows = {r["step"]: r for r in _steps(c, p["id"])}
         for r in rows.values():
-            if r["site"] != site or r["host"] != host or r["label"].lower() != label:
+            if r["site"] != site or r["host"] != host or modes.words(r["label"]).lower() != label:
                 continue
             if not _path_ok(r["path"], d.get("path")):
                 continue
-            want = json.loads(r["digests"] or "[]")
-            if want and got != want:
+            # the texts compared exactly, both ways: a step given no text never
+            # matches a click that sends some (the owner approved no words)
+            if json.loads(r["digests"] or "[]") != (got or []):
                 continue
             if r["used"] >= r["uses"]:
                 continue

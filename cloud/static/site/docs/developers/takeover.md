@@ -35,7 +35,7 @@ The vault needs Docker. `vault up` starts it on `127.0.0.1:7801` with every prot
 
 `AYA_AGENT_ID` and the key come from adding the agent in the app (**Agents → Add an agent**). Node-based clients can use `npx authyouragent-mcp` instead of `authyouragent-mcp`.
 
-The agent gets twenty-two tools:
+The agent gets twenty-three tools:
 
 | Tool | Purpose |
 |---|---|
@@ -45,6 +45,7 @@ The agent gets twenty-two tools:
 | `check_login_wall` | Is the page asking for a password, a CAPTCHA, a code or a sign-in approval? |
 | `list_secrets` | The sign-ins the owner has shared from their password manager: names, sites and fields, never values. |
 | `fill_secret(name, field, ref)` | Type a username, password or authenticator code from the owner's password manager into a field. The agent never sees the value. See [Saved sign-ins](#saved-sign-ins). |
+| `save_secret(name, username)` | Keep the sign-in the owner typed during a take over in their password manager. The vault saves what they typed; the agent never sees or supplies the password. The owner approves it on their phone. |
 | `request_takeover(reason)` | Ask the owner to take over. Returns `done`, `cancelled`, `expired` or `incomplete` with a line saying what to do next, or `waiting` with a `takeover_id` after `wait_seconds` (default 240). |
 | `wait_for_takeover(takeover_id)` | Keep waiting after `waiting`. |
 | `request_approval(site, action)` | Ask the owner to approve an action. `approved`, `denied` or `expired`. |
@@ -128,8 +129,8 @@ submit_plan(
   ])
 ```
 
-- **One card.** The owner sees the window and every step: the address, the button's words and the full text it will post. They approve all steps, tick some, or decline. Unticked steps ask at the time. A card left unanswered pre-approves nothing; the run still goes ahead and each step asks.
-- **Exact match, rules only.** During the window, a click goes through without a card only if it is this agent's, on the step's address (and path, if given), with the same button words and, for anything that posts or sends, the same text: the vault reads the form's fields at click time and sends only a SHA-256 of each, which must equal the text the owner read. Order, trailing spaces and line endings do not count; a changed word does. If the text changes after approval, the vault does not click. Each step runs at most `uses` times (default 1).
+- **One card.** The owner sees the window and every step: the address, the button's words and the full text it will post. They approve all steps, tick some, or decline, with their passkey. Unticked steps ask at the time. A card left unanswered pre-approves nothing; the run still goes ahead and each step asks.
+- **Exact match, rules only.** During the window, a click goes through without a card only if it is this agent's, on the step's https address (and path with its query, if given), with the same button words and the same text (none, if the step gives none): the vault reads the form's fields at click time and sends only a SHA-256 of each, which must equal the text the owner read. Order, trailing spaces and line endings do not count; a changed word does. If the text changes after approval, the vault does not click. Each step runs at most `uses` times (default 1).
 - **A step that does not happen does not stop the plan.** If the owner does not answer a step's card in time, or denies it, or the click fails or gets no answer from the site, that step is skipped, and so is every step that names it in `after`. Those are refused at once without a card ("skipped: step 2 depends on step 1, which was not approved in time"). Every other step carries on.
 - **Always asks.** Payments and anything with an amount, and account or security changes, are listed on the card but never pre-approved.
 - **Limits.** A window is 1 minute to 24 hours and starts within 30 days; at most 20 steps; each text up to 10,000 characters. Steps whose button words could mean anything ("Submit", "Continue") need the exact `path`. The owner can withdraw a plan in the app (Agents, approval modes) at any time.

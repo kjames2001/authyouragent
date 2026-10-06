@@ -2,6 +2,30 @@
 
 Every release of the Python SDK, MCP server and browser vault (`authyouragent` on PyPI, `ghcr.io/kjames2001/authyouragent-vault`), with the changes to the service at authyouragent.com that shipped alongside it. Newest first. Versions are tagged `py-vX.Y.Z` (PyPI) and `js-vX.Y.Z` (npm).
 
+## 0.3.26 (2026-10-06)
+
+**Save the sign-in the owner just typed**
+- After a take over where the owner signed in with a password, their phone offers to keep that sign-in in their password manager: a "Save this login?" card with the username and site (never the password). Save stores it in the shared folder of their Bitwarden or Vaultwarden, named after the site and username; if that fails (a name already taken, the manager unreachable) the phone says why. Skip forgets it. The tap is the owner's approval.
+- The vault reads the sign-in fields while the owner types, every 0.5 s, straight from the page; the values never leave the vault. Forms inside a shadow root (Reddit, X) are read too. A text box counts as the username only if it says so, or sits beside the password field, so a search box is never taken for one. A read on the signed-in page afterwards never replaces the typed password with nothing.
+- What was typed is kept for 10 minutes for the site it was typed on, and only until the next take over, a cancelled one, or the end of the session. It is never offered on another site.
+- `save_secret(name, username)` (MCP, the twenty-third tool): the agent can ask to keep that sign-in when the phone's offer was missed. It asks the owner on their phone first; the agent never sees or supplies the password.
+- The relay and the phone viewer carry the save offer and its result (deployed to the service 2026-10-05).
+
+**Scheduled tasks (fixes to 0.3.25's pre-approval)**
+- A button whose words hold a hyphen or underscore ("Sign-up", "Opt_in") never matched its pre-approved step: the vault sends them as spaces. Matched now.
+- A step given no text no longer matches a click that sends text: before, a pre-approved "Save" went through whatever the agent had typed in the form. The vault likewise refuses a click whose text appeared after the approval.
+- A step's path now includes the query, so `/item?id=1` no longer also approves `/item?id=2`. Plans take `https://` addresses only.
+- The plan card shows each text in full (it kept only the first 600 characters, though the whole text is what is matched).
+- A plan card can no longer be approved with Google or Microsoft: that path ignored which steps were ticked and pre-approved them all. Plans are approved with the passkey.
+
+**Notifications**
+- A notification you tap no longer stays unread: opening the approval card or take over it was about marks it read, as do deciding the request (on any device) and withdrawing a plan.
+- "Session ended" and other notes are marked read when tapped too (Android app 2.2.11 sends which note was tapped; the web app already did).
+
+**Saving a login after a take over**
+- The save offer and `save_secret` refuse a login that is already saved: same username (case ignored) for the same site, under any item name. The phone shows which item holds it.
+- Some sites sign the owner in but leave the tab on their sign-in page (Reddit: the button greys out and the page never moves). Once a new sign-in cookie for the site has been there 4 seconds after a password was typed, the vault reloads that page once, so the hand-back and the save offer follow. Bot-protection cookies (`__cf_bm` and similar) are not counted.
+
 ## 0.3.25 (2026-10-05)
 
 **Scheduled tasks: pre-approval**

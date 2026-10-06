@@ -402,7 +402,234 @@ async def _oidc_end_session(origin):
     return None
 
 
-async def _watch_signin(ws, site, blocked_at_start, cookies_at_start):
+# Reads the sign-in fields of a page (main document and every open shadow
+# root: Reddit and X render their form inside a custom element's shadow root).
+# Input listeners go into every root the walk reaches, because events inside a
+# shadow root are retargeted at its host and a document-only listener never
+# sees them; roots created later are picked up on the next read. Typed values
+# are kept page-side in window.__ayaCapture, so a read just after submit still
+# has them. A text field counts as the username only if it says so
+# (autocomplete/name/id), or if it sits in the same root as a password field:
+# a search box is never taken for one. The values never leave the vault.
+CAPTURE_JS = r"""(function() {
+  var cache = window.__ayaCapture || (window.__ayaCapture = {username: '', password: ''});
+  var TEXT = {text: 1, email: 1, tel: 1};
+  function named(el) {
+    var ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+    var n = (el.name || '').toLowerCase(), i = (el.id || '').toLowerCase();
+    return ac.indexOf('username') >= 0 || ac.indexOf('email') >= 0 ||
+      ['username', 'email', 'login'].indexOf(n) >= 0 || ['username', 'email', 'login'].indexOf(i) >= 0;
+  }
+  function readRoot(root) {
+    var els;
+    try { els = root.querySelectorAll('input'); } catch (e) { return; }
+    var hasPw = false, user = '', guess = '';
+    for (var k = 0; k < els.length; k++) {
+      var el = els[k];
+      if (el.type === 'password') { hasPw = true; if (el.value) cache.password = el.value; }
+      else if (TEXT[el.type] && el.value) {
+        if (named(el)) user = user || el.value; else guess = guess || el.value;
+      }
+    }
+    if (user) cache.username = user;
+    else if (guess && hasPw) cache.username = guess;
+  }
+  function listen(root) {
+    if (root.__ayaListen) return;
+    root.__ayaListen = true;
+    var on = function() { try { readRoot(root); } catch (e) {} };
+    root.addEventListener('input', on, true);
+    root.addEventListener('change', on, true);
+  }
+  var roots = [];
+  (function walk(root) {
+    roots.push(root);
+    var all;
+    try { all = root.querySelectorAll('*'); } catch (e) { return; }
+    for (var j = 0; j < all.length; j++) if (all[j].shadowRoot) walk(all[j].shadowRoot);
+  })(document);
+  var inventory = [];
+  for (var r = 0; r < roots.length; r++) {
+    listen(roots[r]);
+    readRoot(roots[r]);
+    var els = roots[r].querySelectorAll('input');
+    for (var m = 0; m < els.length; m++) {
+      var e2 = els[m];
+      inventory.push({type: e2.type, name: e2.name || e2.id || (e2.getAttribute('autocomplete') || ''),
+                      filled: !!e2.value,
+                      visible: !!(e2.offsetWidth || e2.offsetHeight || e2.getClientRects().length)});
+    }
+  }
+  return JSON.stringify({username: cache.username, password: cache.password,
+                         url: location.origin, inputs: inventory});
+})()"""
+
+CAPTURE_TTL = 600       # s: how long a sign-in read during a take over may still be saved
+SAVE_WAIT_S = 30        # s: how long the phone's save offer waits for Save / Skip
+_cap_diag = {}          # site -> (input inventory signature, last log time)
+_cap_seen = {}          # site -> (username?, password?) last logged
+
+
+def _held_capture(site):
+    """The sign-in read during the last take over on `site`, if still fresh."""
+    c = V.captured
+    if c and c.get("site") == site and time.time() - c.get("t", 0) < CAPTURE_TTL:
+        return c
+    return None
+
+
+def _default_item_name(c):
+    host = (urlparse(c.get("url") or "").hostname or c.get("site") or "site").removeprefix("www.")
+    return f"{host} ({c['username']})" if c.get("username") else host
+
+
+async def _read_signin_fields(site):
+    """Run CAPTURE_JS in the browser tab on `site` (the sign-in step first),
+    over CDP directly: a fresh socket per read, so a page navigating mid-read
+    costs one read, not the watcher. Returns the parsed result or None."""
+    async with ClientSession(timeout=ClientTimeout(total=5)) as s:
+        async with s.get(f"{CDP}/json/list") as r:
+            tabs = [t for t in await r.json() if t.get("type") == "page"]
+
+        def score(t):
+            u = t.get("url") or ""
+            return 3 if _is_auth_step(u) else 2 if _site(urlparse(u).hostname) == site else 1
+        if not tabs:
+            return None
+        ws_url = max(tabs, key=score).get("webSocketDebuggerUrl")
+        if not ws_url:
+            return None
+        async with s.ws_connect(ws_url) as ws:
+            await ws.send_json({"id": 1, "method": "Runtime.evaluate",
+                                "params": {"expression": CAPTURE_JS, "returnByValue": True}})
+            for _ in range(20):         # other CDP events may come first
+                msg = await ws.receive_json()
+                if msg.get("id") == 1:
+                    val = msg.get("result", {}).get("result", {}).get("value")
+                    return json.loads(val) if isinstance(val, str) else None
+    return None
+
+
+async def _capture_signin_fields_fast(site):
+    """One read during a take over: keep what the owner typed in V.captured.
+    A later read with no password (the signed-in page) never replaces a
+    captured password. Logs only when what is held changes."""
+    try:
+        data = await _read_signin_fields(site)
+    except Exception as e:
+        _log("capture read failed:", type(e).__name__)
+        return
+    if not data:
+        return
+    if data.get("username") or data.get("password"):
+        prev = V.captured
+        if not (prev and prev.get("password") and not data.get("password")):
+            V.captured = {"username": data.get("username") or "", "password": data.get("password") or "",
+                          "url": data.get("url") or "", "site": site, "t": time.time()}
+        held = (bool(V.captured.get("username")), bool(V.captured.get("password")))
+        if _cap_seen.get(site) != held:
+            _cap_seen[site] = held
+            _log(f"captured login fields: username={'yes' if held[0] else 'no'} "
+                 f"password={'yes' if held[1] else 'no'}")
+        return
+    inv = data.get("inputs") or []
+    sig, now = str([i.get("type") for i in inv]), time.time()
+    prev_sig, prev_at = _cap_diag.get(site, ("", 0))
+    if sig != prev_sig or now - prev_at > 30:
+        _cap_diag[site] = (sig, now)
+        _log(f"capture_diag {site}: {len(inv)} inputs: " + ("; ".join(
+            f"{i.get('type', '?')}/{i.get('name') or '-'}{':filled' if i.get('filled') else ''}"
+            f"{'' if i.get('visible') else '(hidden)'}" for i in inv[:20]) or "none"))
+
+
+async def _send_quiet(ws, msg):
+    try:
+        await ws.send(json.dumps(msg))
+    except Exception:
+        pass                            # the relay may be closing; nothing to undo
+
+
+async def _offer_save(ws, save_q, site, wait=SAVE_WAIT_S):
+    """The owner signed in with a password: ask on their phone whether to keep
+    it in their password manager. Their Save tap is the approval. The reply
+    comes from screen.run via save_q (it is the only reader of the relay).
+    Skip forgets the capture; no answer keeps it for save_secret, which asks
+    the owner again before it writes."""
+    c = _held_capture(site)
+    if not c or not c.get("password"):
+        return
+    try:
+        await ws.send(json.dumps({"t": "save_prompt", "username": c.get("username", ""),
+                                  "site": c.get("url", "")}))
+    except Exception:
+        return
+    try:
+        resp = await asyncio.wait_for(save_q.get(), timeout=wait)
+    except asyncio.TimeoutError:
+        _log("save offer: no answer from the owner")
+        return
+    if resp.get("t") != "save_login":
+        V.captured = None
+        _log("save offer: the owner skipped it")
+        return
+    name = str(resp.get("name") or "").strip()[:80] or _default_item_name(c)
+    try:
+        await bitwarden.STORE.create(name, c.get("username", ""), c["password"], c.get("url", ""))
+    except Exception as e:
+        why = str(e) if isinstance(e, bitwarden.SecretsError) else f"the password manager could not be reached ({type(e).__name__})"
+        _log("save offer: not saved:", why)
+        await _send_quiet(ws, {"t": "save_done", "ok": False, "error": why[:200]})
+        return
+    V.captured = None
+    V.note("auto", site, "login saved to password manager")
+    _log(f"save offer: saved as '{name}'")
+    await _send_quiet(ws, {"t": "save_done", "ok": True, "name": name})
+
+
+# Bot-protection cookies rotate on their own while a page is open; a change in
+# them says nothing about a sign-in.
+BOT_COOKIE = re.compile(r"^(__cf|cf_|_cfuvid|datadome|ak_bmsc|bm_|_abck|incap_|visid_incap|__ddg|aws-waf|akavpau)", re.I)
+STUCK_S = 4.0                           # a sign-in page left as is this long after the session cookie appears
+
+
+async def _cdp(ws_url, method, params=None):
+    """One CDP call on a fresh socket (nothing stays attached)."""
+    async with ClientSession(timeout=ClientTimeout(total=5)) as s:
+        async with s.ws_connect(ws_url) as ws:
+            await ws.send_json({"id": 1, "method": method, "params": params or {}})
+            for _ in range(50):
+                msg = await ws.receive_json()
+                if msg.get("id") == 1:
+                    return msg.get("result") or {}
+    return {}
+
+
+async def _session_cookies_raw(site):
+    """_site_session over raw CDP: the site's HttpOnly sign-in cookies,
+    without bot-protection ones."""
+    async with ClientSession(timeout=ClientTimeout(total=5)) as s:
+        async with s.get(f"{CDP}/json/version") as r:
+            bws = (await r.json()).get("webSocketDebuggerUrl")
+    cookies = (await _cdp(bws, "Storage.getCookies")).get("cookies") or []
+    return {c["name"] + "@" + c["domain"]: c["value"] for c in cookies
+            if c.get("httpOnly") and _cookie_for(c, site) and not NOT_SESSION.search(c["name"])
+            and not BOT_COOKIE.search(c["name"])}
+
+
+async def _reload_signin_tab(site):
+    """Reload the site's sign-in tab (the one the owner signed in on)."""
+    async with ClientSession(timeout=ClientTimeout(total=5)) as s:
+        async with s.get(f"{CDP}/json/list") as r:
+            tabs = [t for t in await r.json() if t.get("type") == "page"]
+    tab = next((t for t in tabs if _is_auth_step(t.get("url") or "")
+                and _site(urlparse(t["url"]).hostname) == site), None)
+    if tab and tab.get("webSocketDebuggerUrl"):
+        await _cdp(tab["webSocketDebuggerUrl"], "Page.reload")
+        return True
+    return False
+
+
+async def _watch_signin(ws, save_q, site, blocked_at_start, cookies_at_start):
     """Hand back automatically once the owner has finished signing in:
       * the page was blocked at the start and that block is gone, or
       * they went through a sign-in step (a sign-in page, or another site
@@ -412,6 +639,8 @@ async def _watch_signin(ws, site, blocked_at_start, cookies_at_start):
     to confirm no password, code or approval prompt is left."""
     went_through_signin = False
     ok_since = None
+    start_raw = None                    # sign-in cookies when the owner took over
+    stuck = {"since": None, "url": None, "reloaded": set()}
     while True:
         await asyncio.sleep(0.5)
         try:
@@ -423,6 +652,12 @@ async def _watch_signin(ws, site, blocked_at_start, cookies_at_start):
         if away or any(_is_auth_step(u) for u in urls):
             went_through_signin = True
             ok_since = None
+            # read the sign-in fields while the owner is on a sign-in page
+            # (every 0.5 s, so the values are held before the form submits)
+            await _capture_signin_fields_fast(site)
+            ref = [start_raw]
+            await _unstick(site, urls, stuck, ref)
+            start_raw = ref[0]
             continue
         if not on_site or not (blocked_at_start or went_through_signin):
             ok_since = None
@@ -446,12 +681,52 @@ async def _watch_signin(ws, site, blocked_at_start, cookies_at_start):
             finished = False
         if finished:
             _log("sign-in finished, handing back automatically")
+            await _capture_signin_fields_fast(site)     # last read before the page moves on
+            await _offer_save(ws, save_q, site)
             try:
                 await ws.send(json.dumps({"t": "done"}))
             except Exception:
                 pass                    # the relay may already be closing; the sign-in still finished
             return True
         ok_since = None                 # still a prompt on the page: keep watching
+
+
+async def _unstick(site, urls, stuck, start_ref):
+    """Some sites sign the owner in but leave the tab on their sign-in page
+    (Reddit: the session cookie is set, the Log In button stays greyed and
+    the page never moves on). Once a new sign-in cookie for the site has been
+    there STUCK_S with the tab still on the same sign-in address, reload that
+    tab once: the site then shows its signed-in page and the hand-back runs
+    as usual. Only after the owner typed a password; once per cookie set."""
+    try:
+        now_c = await _session_cookies_raw(site)
+    except Exception:
+        return
+    if start_ref[0] is None:
+        start_ref[0] = now_c            # first look: what was there before the owner signed in
+        return
+    held = V.captured if V.captured and V.captured.get("site") == site else None
+    new = {k: v for k, v in now_c.items() if start_ref[0].get(k) != v}
+    url = next((u for u in urls if _is_auth_step(u) and _site(urlparse(u).hostname) == site), None)
+    if not (new and held and held.get("password") and url):
+        stuck["since"] = None
+        return
+    key = tuple(sorted(new.items()))
+    if key in stuck["reloaded"]:
+        return
+    now = time.time()
+    if stuck["since"] is None or stuck["url"] != url:
+        stuck["since"], stuck["url"] = now, url
+        return
+    if now - stuck["since"] < STUCK_S:
+        return
+    stuck["reloaded"].add(key)
+    stuck["since"] = None
+    try:
+        if await _reload_signin_tab(site):
+            _log("signed in but the sign-in page stayed; reloaded it")
+    except Exception as e:
+        _log("reload after sign-in failed:", type(e).__name__)
 
 
 class BadRequest(Exception):
@@ -474,6 +749,7 @@ class Vault:
         self.origins = set()         # and their scheme://host:port
         self.last_ping = time.time()
         self.in_takeover = False
+        self.captured = None         # sign-in the owner typed in a take over (see _held_capture)
         self.lock = asyncio.Lock()
         self.chrome_lock = asyncio.Lock()
         self.jobs = {}
@@ -891,6 +1167,7 @@ class Vault:
             await self.stop_chrome()
             await self.start_chrome()
             self.used, self.hosts, self.origins, self.ledger = False, set(), set(), []
+            self.captured = None
             trust.reset()
             _save(SIGNED_IN_FILE, [])
             _log("session ended:", why, report)
@@ -1248,7 +1525,8 @@ async def _details(page, selector, label):
     tds = _text_digests(d.pop("texts", None))
     if tds:
         d["text_digests"] = tds
-    d["path"] = urlparse(page.url).path or "/"
+    u = urlparse(page.url)
+    d["path"] = ((u.path or "/") + (f"?{u.query}" if u.query else ""))[:300]   # compared with a plan step's path
     d["label"] = (label or "")[:80]
     d["host"] = (urlparse(page.url).hostname or "").lower()   # for a pause on the exact address
     try:
@@ -1564,8 +1842,8 @@ async def _guarded(page, selector, label_of, act, submits_form):
             await _plan_result(page, "failed")
             raise NotApproved(f"the amount changed after approval ({details['amount']} -> "
                               f"{now.get('amount') or 'none'}); not clicked. Ask again.")
-        # a pre-approved text: what is sent must still be what the owner approved
-        if details.get("text_digests") and now.get("text_digests") != details.get("text_digests"):
+        # the text sent must still be what the owner approved (or none, if none was)
+        if now.get("text_digests") != details.get("text_digests"):
             await _plan_result(page, "failed")
             raise NotApproved("the text changed after approval; not clicked. Ask again.")
         if not money:
@@ -1904,6 +2182,8 @@ async def _run_takeover(job, reason):
     # Disconnect the agent before the owner sees anything.
     await V.detach()
     V.in_takeover = True
+    V.captured = None                   # a sign-in from an earlier take over is never offered again
+    _cap_seen.clear()
     try:
         async with websockets.connect(ws_url, max_size=4_000_000,
                                       additional_headers={"Authorization": "Bearer " + t["agent_token"]}) as ws:
@@ -1915,8 +2195,8 @@ async def _run_takeover(job, reason):
                 if k in ("done", "cancelled", "expired", "agent_left"):
                     return await _after_takeover(job, agent, site, k)
             result = await screen.run(ws, lambda: V.relaunch(start_url), _log,
-                                      watcher=lambda w: _watch_signin(w, _site(site), blocked_at_start,
-                                                                     cookies_at_start))
+                                      watcher=lambda w, q: _watch_signin(w, q, _site(site), blocked_at_start,
+                                                                        cookies_at_start))
     finally:
         V.in_takeover = False
     return await _after_takeover(job, agent, site, result)
@@ -1927,6 +2207,8 @@ async def _after_takeover(job, agent, site, result):
     job["final"] = page.url
     if result == "done" and not await login_finished(page):
         result = "incomplete"
+    if result != "done":
+        V.captured = None               # cancelled / unfinished: nothing to keep
     V.note("takeover", (site or "").removeprefix("www."), result)
     await asyncio.to_thread(agent.report_status, f"takeover_{result}", site)
     return result
@@ -1986,6 +2268,52 @@ async def on_cleanup(app):
     await V.pw.stop()
 
 
+async def save_secret(request):
+    """Save the sign-in the owner typed during the last take over on this site
+    (or the filled sign-in form on the current page) to their password manager.
+    The agent never supplies or sees the password. It is a write to the owner's
+    password manager, so the owner approves it on their phone first."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    body = body if isinstance(body, dict) else {}
+    page = await V.attach()
+    V.used = True
+    site = _site(urlparse(page.url).hostname)
+    c = _held_capture(site)
+    if not (c and c.get("password")):
+        try:
+            data = json.loads(await page.evaluate(CAPTURE_JS))
+        except Exception:
+            data = {}
+        if data.get("password"):
+            c = {"username": data.get("username") or "", "password": data["password"],
+                 "url": data.get("url") or "", "site": site, "t": time.time()}
+    if not (c and c.get("password")):
+        return web.json_response({"error": "save", "detail": (
+            "no password to save: none was typed on this site in a recent take over, "
+            "and the page has no filled password field")}, status=400)
+    username = str(body.get("username") or "").strip()[:200] or c.get("username", "")
+    name = str(body.get("name") or "").strip()[:80] or _default_item_name({**c, "username": username})
+    url = c.get("url") or f"{urlparse(page.url).scheme}://{urlparse(page.url).netloc}"
+    label = "Save the login" + (f" for {username}" if username else "") + " to your password manager"
+    try:
+        result = await _approve(page, label, site=site, details={"label": label[:80]})
+    except NotApproved as e:
+        return web.json_response({"error": "not_approved", "detail": str(e)}, status=403)
+    if result != "approved":
+        return web.json_response({"error": "not_approved", "detail": (
+            f"the owner did not approve saving the login ({result}); nothing was saved")}, status=403)
+    try:
+        await bitwarden.STORE.create(name, username, c["password"], url)
+    except bitwarden.SecretsError as e:
+        return web.json_response({"error": "save", "detail": str(e)}, status=400)
+    V.captured = None
+    V.note("auto", site, "login saved to password manager")
+    return web.json_response({"ok": True, "name": name, "site": url})
+
+
 def main():
     app = web.Application(middlewares=[auth])
     app.add_routes([
@@ -1994,6 +2322,7 @@ def main():
         web.post("/type", type_text), web.get("/read", read),
         web.get("/login_wall", login_wall),
         web.get("/secrets", list_secrets), web.post("/fill_secret", fill_secret),
+        web.post("/save_secret", save_secret),
         web.post("/takeover", start_takeover), web.get("/takeover/{jid}", wait_takeover),
         web.post("/end_session", end_session),
         web.post("/press", press), web.post("/select", select), web.post("/scroll", scroll),

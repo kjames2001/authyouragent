@@ -57,12 +57,17 @@ class Screen:
 
 async def run(ws, restart_url, log, watcher=None):
     """Serve one take over on an open relay websocket. Returns how it ended:
-    done / cancelled / expired / agent_left."""
+    done / cancelled / expired / agent_left.
+
+    serve() is the only reader of the relay socket: the owner's save_login /
+    skip reply is handed to the watcher through save_q (a second reader would
+    race it and eat the reply)."""
     import base64
     scr = Screen()
     await ws.send(json.dumps({"t": "mode", "mode": "screen"}))
     stop = asyncio.Event()
     size = {"w": scr.w, "h": scr.h}
+    save_q = asyncio.Queue()
 
     async def frames():
         last = None
@@ -111,12 +116,14 @@ async def run(ws, restart_url, log, watcher=None):
                 await xdo("key", "--clearmodifiers", "alt+Left")
             elif k == "nav" and m.get("to") == "restart":
                 await restart_url()
+            elif k in ("save_login", "skip"):
+                await save_q.put(m)         # the owner's answer to the save offer
             elif k in ("done", "cancelled", "expired", "agent_left"):
                 return k
         return "agent_left"
 
     task = asyncio.create_task(frames())
-    watch = asyncio.create_task(watcher(ws)) if watcher else None
+    watch = asyncio.create_task(watcher(ws, save_q)) if watcher else None
 
     def signed_in():
         # The watcher returns True once it has seen the sign-in finish.

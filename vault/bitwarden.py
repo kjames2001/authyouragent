@@ -86,6 +86,16 @@ def _decrypt(cs, enc_key, mac_key):
     return u.update(d.update(ct) + d.finalize()) + u.finalize()
 
 
+def _encrypt(plain, enc_key, mac_key):
+    """Encrypt to a type-2 cipherstring (AES-256-CBC + HMAC-SHA256)."""
+    iv = os.urandom(16)
+    e = Cipher(algorithms.AES(enc_key), modes.CBC(iv)).encryptor()
+    p = padding.PKCS7(128).padder()
+    ct = e.update(p.update(plain.encode()) + p.finalize()) + e.finalize()
+    mac = hmac.new(mac_key, iv + ct, hashlib.sha256).digest()
+    return "2." + "|".join(base64.b64encode(x).decode() for x in (iv, ct, mac))
+
+
 def _text(cs, key):
     v = _decrypt(cs, *key)
     return v.decode() if v is not None else None
@@ -145,6 +155,7 @@ class Store:
         self.token_until = 0
         self.items = {}             # name -> encrypted cipher JSON
         self.synced = 0
+        self._cached_folders = []   # [{name, id}] decrypted on the last sync
 
     def _load(self):
         if self.cfg is None:
@@ -225,10 +236,14 @@ class Store:
                 data = await r.json(content_type=None)
         lower = lambda d: {k[0].lower() + k[1:]: v for k, v in d.items()} if isinstance(d, dict) else d
         data = lower(data)
-        folder_id = None
+        self._cached_folders = []
         for f in data.get("folders") or []:
-            f = lower(f)
-            if _text(f["name"], self.key) == self.cfg["folder"]:
+            f = lower(f)        # old Vaultwarden: Name/Id; new: name/id
+            self._cached_folders.append(
+                {"name": _text(f["name"], self.key) if f.get("name") else "", "id": f["id"]})
+        folder_id = None
+        for f in self._cached_folders:
+            if f["name"] == self.cfg["folder"]:
                 folder_id = f["id"]
         items = {}
         if folder_id:
@@ -293,6 +308,73 @@ class Store:
         if not v:
             raise SecretsError(f"'{name}' has no {field}")
         return v
+
+    def same_login(self, username, page_url):
+        """The name of an item that already holds this sign-in: the same
+        username (case and spaces ignored) and an address that may be used on
+        page_url. None if there is none."""
+        want = (username or "").strip().lower()
+        for name, c in sorted(self.items.items()):
+            key = self._item_key(c)
+            login = {k[0].lower() + k[1:]: v for k, v in (c.get("login") or {}).items()}
+            if (_text(login.get("username"), key) or "").strip().lower() != want:
+                continue
+            for u in login.get("uris") or []:
+                u = {k[0].lower() + k[1:]: v for k, v in u.items()}
+                if uri_allows(_text(u.get("uri"), key), u.get("match"), page_url):
+                    return name
+        return None
+
+    async def create(self, name, username, password, page_url):
+        """Create a login item in the shared folder. Returns the item name.
+        Refused if the name is taken or the same sign-in is already saved."""
+        await self._sync(force=True)        # another device may have saved it since the last sync
+        if name in self.items:
+            raise SecretsError(f"an item named '{name}' already exists in the '{self.cfg['folder']}' folder")
+        dup = self.same_login(username, page_url)
+        if dup:
+            raise SecretsError(f"this login is already saved as '{dup}'")
+        async with ClientSession(timeout=ClientTimeout(total=30)) as s:
+            if not self.token or time.time() > self.token_until:
+                await self._login(s)
+            _, api = self._endpoints()
+            folder_id = None
+            for f in self._cached_folders:
+                if f["name"] == self.cfg["folder"]:
+                    folder_id = f["id"]
+                    break
+            if not folder_id:
+                folder_cs = _encrypt(self.cfg["folder"], *self.key)
+                async with s.post(api + "/folders", json={"name": folder_cs},
+                                  headers={"Authorization": "Bearer " + self.token}) as r:
+                    if r.status != 200:
+                        raise SecretsError(f"could not create folder ({r.status})")
+                    body = await r.json(content_type=None)
+                    folder_id = body.get("Id") or body.get("id")   # old/new Vaultwarden key casing
+                    if not folder_id:
+                        raise SecretsError(f"could not create folder ({r.status})")
+                    self._cached_folders.append({"name": self.cfg["folder"], "id": folder_id})
+            key = self.key
+            cipher = {
+                "type": 1,
+                "folderId": folder_id,
+                "name": _encrypt(name, *key),
+                "login": {
+                    "username": _encrypt(username, *key) if username else None,
+                    "password": _encrypt(password, *key) if password else None,
+                    "uris": [{"uri": _encrypt(page_url, *key), "match": None}],
+                },
+                "notes": None,
+                "favorite": False,
+            }
+            async with s.post(api + "/ciphers", json=cipher,
+                              headers={"Authorization": "Bearer " + self.token}) as r:
+                if r.status != 200:
+                    body = await r.json(content_type=None)
+                    why = body.get("ValidationErrors") or body.get("message") or str(r.status)
+                    raise SecretsError(f"could not save the login: {why}")
+            await self._sync(force=True)
+        return name
 
 
 STORE = Store()

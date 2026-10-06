@@ -391,6 +391,24 @@ async def fill_secret(name: str, field: str = "password", ref: int = 0, selector
 
 
 @mcp.tool()
+async def save_secret(name: str = "", username: str = "") -> str:
+    """Save the sign-in your user typed by hand during a take over on this site to
+    their password manager, so fill_secret can use it next time. The vault saves
+    what they typed (or a filled sign-in form on the current page); you never see
+    or supply the password. It is a write to their password manager, so they
+    approve it on their phone first. Their phone usually offers this itself right
+    after the take over; use it when they want the sign-in kept and that offer
+    was missed.
+    name: a label for the item (default: site and username).
+    username: only to correct the username the vault read."""
+    try:
+        d = await _call('POST', '/save_secret', json={"name": name, "username": username})
+        return f"saved the login as '{d.get('name')}' for {d.get('site')} in your user's password manager"
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool()
 async def read_page(max_chars: int = 5000, max_elements: int = 80) -> str:
     """Read the current page: its URL, title, visible text in reading order, and a
     numbered list of what you can act on (links, buttons, fields, dropdowns with
@@ -583,7 +601,7 @@ async def submit_plan(title: str, start: str, end: str, steps: list[dict]) -> st
       {"id": "s1", "url": "https://www.reddit.com/r/x/submit",
        "button": "Post",                  # the button's words exactly
        "texts": ["the title", "the body"], # exact text it sends (required for posts/replies/messages)
-       "path": "/r/x/submit",             # optional: exact path, or a prefix ending in *
+       "path": "/r/x/submit",             # optional: exact path and query, or a prefix ending in *
        "after": ["s0"],                   # optional: steps that must be done first
        "uses": 1}                         # optional: times it may run, 1-5
     Payments and security changes are listed for the owner but never
