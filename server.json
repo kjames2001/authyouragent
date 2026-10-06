@@ -2,18 +2,18 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "com.authyouragent/mcp",
   "title": "Auth Your Agent",
-  "description": "Act for a person on websites: sandboxed browser, phone approvals, take over at sign-in walls.",
+  "description": "Act for a person on websites: sandboxed browser, phone approvals, saved logins, scheduled plans.",
   "websiteUrl": "https://authyouragent.com",
   "repository": {
     "url": "https://github.com/kjames2001/authyouragent",
     "source": "github"
   },
-  "version": "0.3.25",
+  "version": "0.3.28",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "authyouragent",
-      "version": "0.3.25",
+      "version": "0.3.28",
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {
