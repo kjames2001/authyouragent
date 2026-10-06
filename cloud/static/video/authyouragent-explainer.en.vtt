@@ -1,121 +1,127 @@
 WEBVTT
 
-00:00:00.750 --> 00:00:03.700
+00:00:00.750 --> 00:00:03.500
 Your AI agent can browse the web.
 
-00:00:03.575 --> 00:00:06.500
+00:00:03.575 --> 00:00:06.300
 Right up until it hits a login page.
 
-00:00:06.362 --> 00:00:08.700
+00:00:06.362 --> 00:00:08.500
 Then you get two bad options:
 
-00:00:08.512 --> 00:00:11.350
+00:00:08.512 --> 00:00:11.150
 hand it your password, or babysit it.
 
-00:00:12.650 --> 00:00:15.400
+00:00:12.650 --> 00:00:15.200
 Auth Your Agent is the third option.
 
-00:00:15.275 --> 00:00:16.725
+00:00:15.275 --> 00:00:16.525
 One rule:
 
-00:00:16.563 --> 00:00:19.550
-your agent never sees your password, and
+00:00:16.563 --> 00:00:19.100
+your agent never sees your password,
 
-00:00:19.250 --> 00:00:21.675
-anything that changes something waits for
+00:00:19.075 --> 00:00:21.350
+and anything that changes something waits
 
-00:00:21.375 --> 00:00:22.675
-your thumb.
+00:00:21.250 --> 00:00:22.475
+for your thumb.
 
-00:00:23.925 --> 00:00:26.488
+00:00:23.925 --> 00:00:26.288
 On most websites, your agent works in the
 
-00:00:26.188 --> 00:00:27.250
+00:00:26.188 --> 00:00:27.050
 vault:
 
-00:00:27.088 --> 00:00:29.962
-a sandboxed browser, in Docker, on your
+00:00:27.088 --> 00:00:29.375
+a sandboxed browser, in Docker,
 
-00:00:29.662 --> 00:00:31.200
-own machine.
+00:00:29.350 --> 00:00:31.000
+on your own machine.
 
-00:00:32.450 --> 00:00:35.163
-If you keep your logins in Bitwarden or
+00:00:32.450 --> 00:00:35.900
+If you keep your logins in Bitwarden or Vaultwarden,
 
-00:00:34.863 --> 00:00:37.837
-Vaultwarden, the vault can type a saved
+00:00:35.900 --> 00:00:39.437
+the vault can type a saved password or authenticator
 
-00:00:37.537 --> 00:00:40.387
-password or authenticator code for your
+00:00:39.337 --> 00:00:41.100
+code for your agent.
 
-00:00:40.087 --> 00:00:41.300
-agent.
-
-00:00:41.163 --> 00:00:43.925
+00:00:41.163 --> 00:00:43.725
 The agent only names the item.
 
-00:00:43.725 --> 00:00:45.975
+00:00:43.725 --> 00:00:45.775
 It never sees the value.
 
-00:00:47.275 --> 00:00:50.088
-Anything a saved login can't handle, like
+00:00:47.275 --> 00:00:49.700
+Anything a saved login can't handle,
 
-00:00:49.788 --> 00:00:52.925
-a captcha, a texted code, or a site you
+00:00:49.638 --> 00:00:52.000
+like a captcha, a texted code,
 
-00:00:52.625 --> 00:00:55.575
-haven't saved, goes to your phone.
+00:00:51.975 --> 00:00:54.475
+or a site you haven't saved, goes to your
 
-00:00:55.437 --> 00:00:58.538
-It buzzes, you see the live page, sign in
+00:00:54.375 --> 00:00:55.375
+phone.
 
-00:00:58.238 --> 00:01:00.325
-yourself, and hand it back.
+00:00:55.437 --> 00:00:57.875
+It buzzes, you see the live page,
 
-00:01:01.675 --> 00:01:03.400
+00:00:57.863 --> 00:01:00.125
+sign in yourself, and hand it back.
+
+00:01:01.675 --> 00:01:03.150
 Reading is free.
 
-00:01:03.250 --> 00:01:05.000
-But when it clicks something that would
+00:01:03.175 --> 00:01:05.163
+But when it clicks something that would change
 
-00:01:04.700 --> 00:01:08.037
-change something, like submit or buy, that
+00:01:05.063 --> 00:01:07.125
+something, like submit or buy,
 
-00:01:07.737 --> 00:01:10.475
-click is held until you tap Approve, or
+00:01:07.125 --> 00:01:09.650
+that click is held until you tap Approve,
 
-00:01:10.175 --> 00:01:11.375
-Deny.
+00:01:09.600 --> 00:01:10.675
+or Deny.
 
-00:01:12.625 --> 00:01:15.450
+00:01:10.737 --> 00:01:12.700
+Payments always ask.
+
+00:01:12.762 --> 00:01:15.625
+For the rest, you pick a mode for each site.
+
+00:01:17.075 --> 00:01:19.700
 When the job is done, the vault signs out,
 
-00:01:15.300 --> 00:01:18.100
+00:01:19.750 --> 00:01:22.350
 checks that it worked, and wipes the browser.
 
-00:01:19.400 --> 00:01:21.775
+00:01:23.850 --> 00:01:26.025
 Websites can also build it in:
 
-00:01:21.613 --> 00:01:24.300
+00:01:26.063 --> 00:01:28.550
 a sign in with your agent button.
 
-00:01:24.162 --> 00:01:27.613
-The agent signs with its own key, you approve
+00:01:28.612 --> 00:01:31.100
+The agent signs with its own key,
 
-00:01:27.313 --> 00:01:30.337
-with a passkey, and the site gets short-lived
+00:01:31.125 --> 00:01:33.950
+you approve with a passkey, and the site gets
 
-00:01:30.037 --> 00:01:32.825
-tokens tied to that one agent.
+00:01:33.850 --> 00:01:37.075
+short-lived tokens tied to that one agent.
 
-00:01:34.125 --> 00:01:35.600
+00:01:38.575 --> 00:01:39.850
 Auth Your Agent.
 
-00:01:35.437 --> 00:01:38.875
+00:01:39.887 --> 00:01:43.125
 The vault and MCP server are free and open
 
-00:01:38.575 --> 00:01:39.625
+00:01:43.025 --> 00:01:43.875
 source.
 
-00:01:39.475 --> 00:01:42.300
+00:01:43.925 --> 00:01:46.550
 Find it at auth your agent dot com.
