@@ -115,6 +115,10 @@ def classify(label, details=None):
         return "delete", f"'{w}' deletes or cancels something"
     if PUBLISH.search(w):
         return "publish", f"'{w}' posts or sends as you"
+    # a harmless-sounding button that sends text typed into its form (old
+    # Reddit's comment box says "save") may be publishing it: Smart asks
+    if d.get("text_digests"):
+        return "publish", f"'{w}' sends text typed into the page"
     if LOW_RISK.match(w):
         return "low", f"'{w}' can be undone"
     return "unknown", f"'{w}' is not on the low-risk list"

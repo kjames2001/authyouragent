@@ -8,6 +8,7 @@ Every release of the Python SDK, MCP server and browser vault (`authyouragent` o
 - The vault now reads where a click sends: the form's address (or the button's own `formaction`, or a link's address). After the owner taps Approve it reads the page again and clicks only if the page's address and the form's destination are unchanged, as it already did for the amount and the text. A page that re-points its form while the card is open gets "the form now sends to <host> after approval; not clicked".
 - The card says "Sends to <host>" when the form posts to another site than the page.
 - Smart mode asks when the form posts to another site, even for a low-risk button, and a plan step never pre-approves such a click.
+- Smart mode also asks when a click sends text typed into the page, whatever the button says. Old Reddit's comment button reads "save", which Smart had let through as a low-risk click. Plans are unchanged: a step pre-approved with its exact text still runs. (Service change, deployed 2026-10-06.)
 
 **Saved logins are told to the owner**
 - When the vault types one of the owner's saved passwords into a page (`fill_secret`), the owner's phone gets a notification: "Saved login used on <site>", naming the login, never its value. Once per login and address per session, sent by the vault, so the agent cannot leave it out, and not turned off by the session-notice setting. The end-of-session summary lists "Saved logins used" too.
