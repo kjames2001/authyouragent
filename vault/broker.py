@@ -754,6 +754,7 @@ class Vault:
         self.chrome_lock = asyncio.Lock()
         self.jobs = {}
         self.ledger = []             # what the vault decided this session, for the summary
+        self.secrets_used = set()    # (item, host) the owner was told about this session
         self._agent = None
         self.wba_key = None          # Ed25519 key, set once the cloud publishes it
         self.wba_agent = None        # Signature-Agent address (https://<label>.agents...)
@@ -1167,6 +1168,7 @@ class Vault:
             await self.stop_chrome()
             await self.start_chrome()
             self.used, self.hosts, self.origins, self.ledger = False, set(), set(), []
+            self.secrets_used = set()
             self.captured = None
             trust.reset()
             _save(SIGNED_IN_FILE, [])
@@ -1216,7 +1218,8 @@ class Vault:
             lines.append("Sites: " + ", ".join(sites[:8]) + (f" (+{len(sites) - 8})" if len(sites) > 8 else ""))
         groups = [("approved", "You approved"), ("denied", "You denied"),
                   ("expired", "No answer, not done"), ("auto", "Went through by your approval mode"),
-                  ("unknown", "Clicked, the site never answered"), ("takeover", "Take over")]
+                  ("unknown", "Clicked, the site never answered"), ("takeover", "Take over"),
+                  ("secret", "Saved logins used")]
         for kind, head in groups:
             items = [f"{w}{' ' + x if x else ''} ({s})" for k, s, w, x in self.ledger if k == kind]
             if items:
@@ -1234,6 +1237,27 @@ class Vault:
             lines.append("Sign-out: " + "; ".join(outs))
         stopped = why == "agent stopped sending heartbeats"
         return ("Session ended: agent stopped" if stopped else "Session ended"), "\n".join(lines)
+
+    def tell_secret_used(self, name, host):
+        """A saved login was typed into a page: tell the owner's phone once per
+        login and address per session. Sent by the vault, so the agent cannot
+        leave it out. Never raises."""
+        key = (name, host)
+        if key in self.secrets_used:
+            return
+        self.secrets_used.add(key)
+        self.note("secret", host.removeprefix("www."), name)
+        try:
+            agent = self.agent()
+            r = agent.client.post(f"{agent.base}/api/v1/agent-notify", timeout=10, json={
+                "agent_id": agent.agent_id, "agent_jwt": agent._agent_jwt(), "kind": "secret_used",
+                "title": f"Saved login used on {host.removeprefix('www.')}",
+                "text": f"The vault typed your saved login '{name}' into {host}. "
+                        "The agent never saw the password. Not you? Revoke the agent."})
+            if r.status_code >= 400:
+                _log("secret-used note refused:", r.status_code, r.text[:120])
+        except Exception as e:
+            _log("secret-used note failed:", e)
 
     def send_summary(self, why, report):
         """One notification per session. Returns True if the cloud took it."""
@@ -1484,9 +1508,16 @@ DETAILS_JS = r"""(el) => {
       if (texts.length >= 8) break;
     }
   }
+  // where the click sends: the button's own formaction, else its form's
+  // action, else a link's address. Read as resolved absolute URLs.
+  let target = '';
+  try {
+    if (form) target = (btn.formAction && btn.hasAttribute('formaction')) ? btn.formAction : form.action;
+    else if (btn.href) target = btn.href;
+  } catch (e) {}
   return {amount: amount.slice(0, 40), item: item.slice(0, 120), order: order.slice(0, 60),
           card_fields: card, password_fields: inputs.filter(i => i.type === 'password').length >= 2,
-          texts};
+          texts, target: String(target || '')};
 }"""
 
 
@@ -1516,6 +1547,22 @@ def _text_digests(texts):
     return sorted(hashlib.sha256(_norm_text(t).encode()).hexdigest() for t in (texts or [])[:8] if _norm_text(t))
 
 
+def _moved(before, now, url_before, url_now):
+    """Why an approved click no longer goes where the owner was shown, or "".
+    The page's address (host and path; the query may carry a fresh token)
+    and where the form posts are compared with what was read before the card."""
+    a, b = urlparse(url_before), urlparse(url_now)
+    if (a.hostname or "").lower() != (b.hostname or "").lower():
+        return f"the page moved to {b.hostname or 'another address'}"
+    if (a.path or "/") != (b.path or "/"):
+        return "the page changed"
+    if before.get("target") != now.get("target"):
+        where = now.get("target_host") or "nowhere"
+        return f"the form now sends to {where}" if where != before.get("target_host") \
+            else "the form now sends to another address"
+    return ""
+
+
 async def _details(page, selector, label):
     try:
         d = await page.locator(selector).first.evaluate(DETAILS_JS)
@@ -1525,6 +1572,14 @@ async def _details(page, selector, label):
     tds = _text_digests(d.pop("texts", None))
     if tds:
         d["text_digests"] = tds
+    tg = d.pop("target", "")
+    if tg:
+        t = urlparse(tg)
+        if t.scheme in ("http", "https") and t.hostname:
+            # where the form posts (or the link goes): its address and path,
+            # re-read after the owner taps, so an approval cannot be sent elsewhere
+            d["target_host"] = t.hostname.lower()
+            d["target"] = (f"{t.scheme}://{t.netloc.lower()}{t.path or '/'}")[:300]
     u = urlparse(page.url)
     d["path"] = ((u.path or "/") + (f"?{u.query}" if u.query else ""))[:300]   # compared with a plan step's path
     d["label"] = (label or "")[:80]
@@ -1831,6 +1886,7 @@ async def _guarded(page, selector, label_of, act, submits_form):
                                  + (", and the site never answered: it may already have gone through"
                                     if prev["unknown"] else ""))
         PLAN_TXN.pop(page, None)
+        approved_url = page.url
         result = await _approve(page, label, details=details)
         if result != "approved":
             PLAN_TXN.pop(page, None)
@@ -1846,6 +1902,12 @@ async def _guarded(page, selector, label_of, act, submits_form):
         if now.get("text_digests") != details.get("text_digests"):
             await _plan_result(page, "failed")
             raise NotApproved("the text changed after approval; not clicked. Ask again.")
+        # and it must still go where the owner was shown: the same page, and the
+        # form still posting to the same address
+        moved = _moved(details, now, approved_url, page.url)
+        if moved:
+            await _plan_result(page, "failed")
+            raise NotApproved(f"{moved} after approval; not clicked. Ask again.")
         if not money:
             if page not in PLAN_TXN:
                 return await act()
@@ -2140,6 +2202,9 @@ async def fill_secret(request):
         return web.json_response({"error": "secrets", "detail": "the field changed while it was filled; cleared"}, status=400)
     site = urlparse(page.url).hostname or ""
     await asyncio.to_thread(V.agent().report_status, "secret_filled", site, f"{name} ({field})")
+    if field == "password":
+        # a sign-in with the owner's saved login: their phone hears of it
+        await asyncio.to_thread(V.tell_secret_used, name, site)
     return web.json_response({**await _where(page), "filled": field})
 
 

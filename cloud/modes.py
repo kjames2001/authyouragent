@@ -202,6 +202,23 @@ def _site_rule(c, user_id, agent_id, site):
     return (r[0], r[1] or DEFAULT_LIMIT, "*") if r else ("ask", DEFAULT_LIMIT, "*")
 
 
+def site_of(host):
+    """The site a host belongs to: the last two labels, or an IP as is
+    (the vault's rule, broker._site)."""
+    host = (host or "").lower()
+    if re.fullmatch(r"[\d.]+|\[?[0-9a-f:]+\]?", host):
+        return host
+    parts = host.split(".")
+    return ".".join(parts[-2:]) if len(parts) >= 2 else host
+
+
+def sends_elsewhere(site, details):
+    """The host a click's form posts to when that is another site than the
+    page's, else "". Vaults before 0.3.27 do not send it: ""."""
+    th = (details or {}).get("target_host") or ""
+    return th if th and site_of(th) != site_of(site) else ""
+
+
 def decide(c, user_id, agent_id, site, label, details=None, now=None):
     """(auto: bool, why: str). auto=True means approve without asking.
     `site` is the domain; details["host"] (vault 0.3.20+) the exact address."""
@@ -219,6 +236,9 @@ def decide(c, user_id, agent_id, site, label, details=None, now=None):
     # smart
     if cat != "low":
         return False, f"Smart ({scope}): {reason}, so it asks"
+    off = sends_elsewhere(site, details)
+    if off:
+        return False, f"Smart ({scope}): the form sends to {off}, another site, so it asks"
     q = ("SELECT 1 FROM authnz_requests WHERE user_id=? AND agent_id=? AND site=? "
          "AND kind='agent_approval' AND status='denied' AND created_at>?")
     args = [user_id, agent_id, site, now - PAUSE_AFTER_DENY]
@@ -256,6 +276,11 @@ def clean_details(d):
     h = d.get("host")
     if isinstance(h, str) and HOST_RE.match(h.strip().lower()) and len(h) <= 253:
         out["host"] = h.strip().lower()
+    # where the form posts (vault 0.3.27+); shown on the card when it is
+    # another site than the page
+    th = d.get("target_host")
+    if isinstance(th, str) and HOST_RE.match(th.strip().lower()) and len(th) <= 253:
+        out["target_host"] = th.strip().lower()
     for k in ("card_fields", "password_fields"):
         if d.get(k) is True:
             out[k] = True

@@ -2,6 +2,16 @@
 
 Every release of the Python SDK, MCP server and browser vault (`authyouragent` on PyPI, `ghcr.io/kjames2001/authyouragent-vault`), with the changes to the service at authyouragent.com that shipped alongside it. Newest first. Versions are tagged `py-vX.Y.Z` (PyPI) and `js-vX.Y.Z` (npm).
 
+## 0.3.27 (2026-10-06)
+
+**An approval cannot be sent somewhere else**
+- The vault now reads where a click sends: the form's address (or the button's own `formaction`, or a link's address). After the owner taps Approve it reads the page again and clicks only if the page's address and the form's destination are unchanged, as it already did for the amount and the text. A page that re-points its form while the card is open gets "the form now sends to <host> after approval; not clicked".
+- The card says "Sends to <host>" when the form posts to another site than the page.
+- Smart mode asks when the form posts to another site, even for a low-risk button, and a plan step never pre-approves such a click.
+
+**Saved logins are told to the owner**
+- When the vault types one of the owner's saved passwords into a page (`fill_secret`), the owner's phone gets a notification: "Saved login used on <site>", naming the login, never its value. Once per login and address per session, sent by the vault, so the agent cannot leave it out, and not turned off by the session-notice setting. The end-of-session summary lists "Saved logins used" too.
+
 ## 0.3.26 (2026-10-06)
 
 **Save the sign-in the owner just typed**
