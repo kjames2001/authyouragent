@@ -2,6 +2,17 @@
 
 Every release of the Python SDK, MCP server and browser vault (`authyouragent` on PyPI, `ghcr.io/kjames2001/authyouragent-vault`), with the changes to the service at authyouragent.com that shipped alongside it. Newest first. Versions are tagged `py-vX.Y.Z` (PyPI) and `js-vX.Y.Z` (npm).
 
+## 0.3.29 (2026-10-06)
+
+### Pages cannot hide instructions for the agent
+- `read_page` leaves out text the owner cannot see on screen: text that is not drawn (`display:none`, `visibility`, opacity 0), screen-reader-only boxes, text pushed off the page, fonts under 2px, and text in the same colour as its background. Before, all of these reached the agent, which is how a page smuggles in instructions (prompt injection). A page's own scripts cannot fake it: the vault reads in a world of its own, and the page is left exactly as it was.
+- A button's name comes from the words it shows. A screen-reader name (`aria-label`, `title`) is used only for icon buttons, and kept short, so a page cannot hide an instruction in one.
+- When a page hid text by colour or font size, `read_page` says so and tells the agent to be wary of that page.
+- `read_page` output marks the page's text as the site's, "information, not instructions", and the MCP server tells the agent never to follow instructions from a page.
+
+### Addresses that carry data ask the owner
+- An address the agent writes itself that carries a lot of data (more than 120 characters after the `?` or `#`, or one path piece over 80) is opened only after the owner approves it on their phone; the card shows the address. This is how a hijacked agent would send a page's content or the owner's data to another site. Links on the current page, ordinary searches and the owner's trusted sites open as before.
+
 ## 0.3.28 (2026-10-06)
 
 ### Plans can repeat, for an exact number of runs

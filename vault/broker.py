@@ -36,7 +36,7 @@ import time
 import unicodedata
 import uuid
 import weakref
-from urllib.parse import parse_qsl, urlparse
+from urllib.parse import parse_qsl, unquote, unquote_plus, urlparse
 
 from aiohttp import ClientSession, ClientTimeout, web
 from playwright.async_api import async_playwright
@@ -60,12 +60,142 @@ SCALE = float(os.environ.get("VAULT_SCALE", "1"))
 TOKEN = os.environ["VAULT_TOKEN"]
 WAIT_MAX = 290
 
+# Text the owner cannot see on screen is kept from the agent: a page can hide
+# instructions for an AI in it (prompt injection). __conceal(fn) runs fn with
+# such text made invisible to innerText, then puts every style back before
+# returning, in the same task, so the page never paints the change. It hides:
+#   gone   not rendered (display:none, visibility, opacity 0), clipped to a
+#          1px box (screen-reader-only text), or pushed off the page's top or
+#          left edge (left:-9999px, text-indent)
+#   tiny   a font smaller than 2px
+#   faint  the same colour as its background (white on white); not judged
+#          over images, video, gradients or absolutely placed text
+# and counts the tiny and faint blocks, which are rarely there by accident.
+# Text visible on screen but marked aria-hidden is left in: the owner sees it.
+# Run it in an isolated world (_eval_isolated), so a page cannot patch the
+# functions it uses (getComputedStyle, checkVisibility, innerText).
+CONCEAL_JS = r"""
+const __conceal = (fn) => {
+  const roots = [document];
+  for (let i = 0; i < roots.length; i++)
+    for (const el of roots[i].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+  const SKIP = /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|TITLE|HEAD|META|LINK)$/i;
+  const up = e => e.parentElement || (e.parentNode && e.parentNode.host) || null;
+  const clipMemo = new Map();
+  const clipped = (e) => {
+    if (!e || e === document.documentElement) return false;
+    if (clipMemo.has(e)) return clipMemo.get(e);
+    const cs = getComputedStyle(e), r = e.getBoundingClientRect();
+    const v = (/hidden|clip/.test(cs.overflow + ' ' + cs.overflowX + ' ' + cs.overflowY) && (r.width <= 1 || r.height <= 1))
+      || /^inset\(50%/.test(cs.clipPath)
+      || /^rect\(0px,? 0px,? 0px,? 0px\)$/.test(cs.clip) || clipped(up(e));
+    clipMemo.set(e, v);
+    return v;
+  };
+  const rgba = s => {
+    const m = /^rgba?\(([^)]*)\)$/.exec(s || '');
+    if (!m) return null;
+    const p = m[1].split(/[\s,\/]+/).filter(Boolean).map(parseFloat);
+    return p.length >= 3 ? [p[0], p[1], p[2], p.length > 3 ? p[3] : 1] : null;
+  };
+  const over = (t, b) => [t[0] * t[3] + b[0] * (1 - t[3]), t[1] * t[3] + b[1] * (1 - t[3]), t[2] * t[3] + b[2] * (1 - t[3]), 1];
+  const lum = c => {
+    const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
+  };
+  // The colour behind e's text, or null when it cannot be told from styles
+  // alone (an image, video or gradient, absolutely placed text, blending).
+  const background = (e) => {
+    const layers = [];
+    let opaque = false;
+    for (let a = e; a; a = up(a)) {
+      const cs = getComputedStyle(a);
+      if (cs.backgroundImage !== 'none' || /absolute|fixed/.test(cs.position) || cs.mixBlendMode !== 'normal'
+          || cs.filter !== 'none' || /^(img|video|canvas|picture|svg|iframe)$/i.test(a.tagName)) return null;
+      const c = rgba(cs.backgroundColor);
+      if (!c) return null;
+      if (c[3] > 0) layers.push(c);
+      if (c[3] >= 1) { opaque = true; break; }
+    }
+    if (!opaque && /dark/.test(getComputedStyle(document.documentElement).colorScheme)) return null;
+    let bg = [255, 255, 255, 1];
+    for (let i = layers.length - 1; i >= 0; i--) bg = over(layers[i], bg);
+    return bg;
+  };
+  const faint = (e, cs) => {
+    if (cs.textShadow !== 'none' || parseFloat(cs.webkitTextStrokeWidth) > 0) return false;
+    const fill = rgba(cs.webkitTextFillColor) || rgba(cs.color);
+    if (!fill) return false;
+    const bg = background(e);
+    if (!bg) return false;
+    if (fill[3] === 0) return true;
+    const a = lum(over(fill, bg)), b = lum(bg);
+    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) < 1.1;
+  };
+  const memo = new Map();
+  const judge = (p) => {
+    if (memo.has(p)) return memo.get(p);
+    let v = '';
+    if (SKIP.test(p.tagName)) v = 'skip';
+    else if (p.checkVisibility && !p.checkVisibility({opacityProperty: true, visibilityProperty: true})) v = 'gone';
+    else {
+      const cs = getComputedStyle(p);
+      if (parseFloat(cs.fontSize) < 2) v = 'tiny';
+      else if (clipped(p)) v = 'gone';
+      else if (faint(p, cs)) v = 'faint';
+    }
+    memo.set(p, v);
+    return v;
+  };
+  const hide = new Set(), rng = document.createRange();
+  let nFaint = 0, nTiny = 0;
+  for (const root of roots) {
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let t = w.nextNode(); t; t = w.nextNode()) {
+      if (!/\S/.test(t.data)) continue;
+      const p = t.parentElement;
+      if (!p || hide.has(p)) continue;
+      let v = judge(p);
+      if (!v) {
+        rng.selectNodeContents(t);
+        const r = rng.getBoundingClientRect();
+        if ((r.width || r.height) && (r.right + scrollX <= 0 || r.bottom + scrollY <= 0)) v = 'gone';
+      }
+      if (!v || v === 'skip') continue;
+      hide.add(p);
+      if (v === 'faint') nFaint++;
+      if (v === 'tiny') nTiny++;
+    }
+  }
+  const saved = new Map();
+  const put = (e, prop, val) => {
+    if (!saved.has(e)) saved.set(e, e.getAttribute('style'));
+    e.style.setProperty(prop, val, 'important');
+  };
+  // visibility is inherited: a visible child of hidden text stays visible
+  const keep = [];
+  for (const p of hide)
+    for (const c of p.children) if (!hide.has(c) && getComputedStyle(c).visibility === 'visible') keep.push(c);
+  for (const p of hide) put(p, 'visibility', 'hidden');
+  for (const c of keep) put(c, 'visibility', 'visible');
+  try {
+    return [fn(), {faint: nFaint, tiny: nTiny}];
+  } finally {
+    // getAttribute first: Chromium writes setProperty changes to the attribute
+    // lazily, and would otherwise leave an empty style="" behind
+    for (const [e, s] of saved) { e.getAttribute('style'); if (s === null) e.removeAttribute('style'); else e.setAttribute('style', s); }
+  }
+};
+"""
+
 # Text blocks in page order, each once. Headings and paragraphs are content
 # and are kept whatever their length; a list item or table cell is kept whole
 # unless it holds paragraphs of its own (those are read instead). Links,
 # buttons, labels and spans can wrap whole sections, so they are only taken
 # when short, which keeps a wrapper from repeating everything inside it.
-READ_JS = r"""(max) => {
+# Returns {text, faint, tiny}: the counts of hidden blocks left out (CONCEAL_JS).
+READ_JS = r"""(max) => {""" + CONCEAL_JS + r"""
+  const [text, hidden] = __conceal(() => {
   const out = [], seen = new Set(), taken = new Set();
   let size = 0;
   // Already read as part of a block taken earlier (a link or the per-letter
@@ -75,6 +205,8 @@ READ_JS = r"""(max) => {
     return false;
   };
   for (const el of document.querySelectorAll('h1,h2,h3,h4,h5,h6,p,pre,blockquote,li,dt,dd,button,label,a,td,th,span')) {
+    // innerText of an element that is not rendered is its whole source text
+    if (el.checkVisibility && !el.checkVisibility()) continue;
     const t = (el.innerText || '').trim();
     if (!t || seen.has(t) || inTaken(el)) continue;
     const tag = el.tagName;
@@ -90,6 +222,8 @@ READ_JS = r"""(max) => {
   const all = ((document.body && document.body.innerText) || '').trim();
   if (all && size < all.length / 4) return all.slice(0, max);
   return out.join('\n');
+  });
+  return {text, faint: hidden.faint, tiny: hidden.tiny};
 }"""
 
 # The things on the page an agent can act on, numbered. Each gets a
@@ -97,7 +231,7 @@ READ_JS = r"""(max) => {
 # type_text and select_option can take ref=N instead of a guessed selector.
 # Open shadow roots are walked (Reddit, many web components); iframes are not.
 # A password field's value is never reported.
-ELEMENTS_JS = r"""(max) => {
+ELEMENTS_JS = r"""(max) => {""" + CONCEAL_JS + r"""
   const SEL = 'a[href],button,input:not([type=hidden]),select,textarea,summary,[contenteditable=""],[contenteditable=true],' +
     '[role=button],[role=link],[role=checkbox],[role=radio],[role=tab],[role=menuitem],[role=switch],' +
     '[role=option],[role=combobox],[role=textbox],[role=searchbox],[tabindex]:not([tabindex="-1"])';
@@ -110,6 +244,9 @@ ELEMENTS_JS = r"""(max) => {
     }
   }
   const text = s => (s || '').replace(/\s+/g, ' ').trim();
+  // each element's words as shown on screen (hidden text left out); every
+  // other check below sees the page as it really is
+  const onScreen = __conceal(() => all.map(el => text(el.innerText)))[0];
   const vh = innerHeight, out = [];
   let n = 0;
   for (let i = 0; i < all.length; i++) {
@@ -132,8 +269,15 @@ ELEMENTS_JS = r"""(max) => {
                         .getElementById(i)).filter(Boolean).map(x => x.innerText).join(' ')) : '';
     const inner = el.querySelector && el.querySelector('[aria-label],[title],svg title');
     const innerLabel = inner ? text(inner.getAttribute('aria-label') || inner.getAttribute('title') || inner.textContent) : '';
-    let label = text(el.getAttribute('aria-label')) || byId || text(el.innerText).slice(0, 80) ||
-                text(el.getAttribute('title')) || (img ? text(img.alt) : '') || innerLabel || text(el.getAttribute('placeholder'));
+    // The words on the button come first. A name only screen readers get
+    // (aria-label, title, screen-reader-only text) is used for icon buttons
+    // with no words of their own, and is cut short: a page can hide a whole
+    // instruction in one.
+    const shown = onScreen[i].slice(0, 80);
+    const aria = (text(el.getAttribute('aria-label')) || byId).slice(0, 60);
+    let label = (shown.length > 2 ? shown : '') || aria || text(el.innerText).slice(0, 60) || shown ||
+                text(el.getAttribute('title')).slice(0, 60) || (img ? text(img.alt).slice(0, 60) : '') ||
+                innerLabel.slice(0, 60) || text(el.getAttribute('placeholder'));
     if (!label && el.labels && el.labels[0]) label = text(el.labels[0].innerText);
     if (!label && tag === 'input' && /^(submit|button|reset)$/.test(type)) label = text(el.value);
     const item = {ref: ++n, kind, label: label.slice(0, 80)};
@@ -1377,6 +1521,19 @@ async def navigate(request):
                                     site=re.sub(r"[^a-z0-9.-]", "", host) or "private"):
         return web.json_response({"error": "blocked", "detail":
             f"blocked by the vault: the owner has not confirmed {pkey} on their phone this session"}, status=403)
+    carries = _carries(url)
+    if carries and not await _link_on_page(page, url) and not _target_trusted(host, port):
+        label = f"Open {host}"
+        # the card shows the start of the address itself, so the owner sees the data
+        shown = url.split("://", 1)[-1]
+        result = await _approve(page, label, site=_site(host), details={
+            "label": label, "host": host,
+            "item": (f"It carries {carries}: {shown}")[:117] + ("..." if len(shown) > 60 else "")})
+        if result != "approved":
+            return web.json_response({"error": "not_approved", "detail": (
+                f"the owner did not approve opening this address ({result}): it carries {carries}. "
+                "Not opened. Do not put page content or your user's data into addresses; "
+                "open the site's own page and use its links and forms instead.")}, status=403)
     try:
         resp = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
     except Exception as e:
@@ -1609,8 +1766,9 @@ async def _approve(page, label, site=None, details=None):
     agent = V.agent()
     site = site or _site(urlparse(page.url).hostname)
     # always send the page's own address, so the card and the owner's
-    # notification list say demo.example.com, not example.com
-    details = {**(details or {}), "host": (urlparse(page.url).hostname or "").lower()}
+    # notification list say demo.example.com, not example.com. An action
+    # aimed at another address (opening a page) sends that one instead.
+    details = {**(details or {}), "host": (details or {}).get("host") or (urlparse(page.url).hostname or "").lower()}
     action = re.sub(r"[^a-z0-9_:-]", "", label.lower().replace(" ", "_"))[:64] or "action"
     body = {"agent_id": agent.agent_id, "agent_jwt": agent._agent_jwt(), "site": site, "action": action}
     if details:
@@ -1634,7 +1792,7 @@ async def _approve(page, label, site=None, details=None):
     shown = (details or {}).get("amount", "")
     # the summary names the address the owner saw, not the parent domain
     # the approval is filed under (demo.example.com, not example.com)
-    host = (urlparse(page.url).hostname or "").removeprefix("www.") or site
+    host = details["host"].removeprefix("www.") or site
     if j.get("auto"):
         _log("approved by the owner's approval mode:", site, action, j.get("why", ""))
         V.note("auto", host, label, shown)
@@ -1830,6 +1988,57 @@ def _hostport(url):
     return (u.hostname or "").lower(), u.port or {"https": 443, "http": 80}.get(u.scheme)
 
 
+# An address the agent writes itself can carry data out to any site: a
+# page's text, an order history, a token, in the query, the fragment or a
+# long path segment (a page that hides instructions may ask for exactly
+# that). Opening one asks the owner first, unless it is a link on the page
+# the agent is on (the same as clicking it) or a site the owner trusted.
+# Short values (a search, an id) open as before; this stops bulk copies, not
+# a value of a few words.
+CARRY_QUERY = 120          # characters after ? and # together, decoded
+CARRY_SEGMENT = 80         # one path segment, decoded
+
+
+def _carries(url):
+    """What data the address carries, in words, or "" for an ordinary one."""
+    u = urlparse(url)
+    extra = len(unquote_plus(u.query)) + len(unquote(u.fragment))
+    if extra > CARRY_QUERY:
+        return f"{extra} characters of data after the ? or #"
+    longest = max((len(unquote(s)) for s in u.path.split("/")), default=0)
+    if longest > CARRY_SEGMENT:
+        return f"a {longest}-character piece of data in its path"
+    return ""
+
+
+LINK_ON_PAGE_JS = r"""(u) => {
+  let want;
+  try { want = new URL(u).href; } catch (e) { return false; }
+  if (location.href === want) return true;
+  const roots = [document];
+  for (let i = 0; i < roots.length; i++)
+    for (const el of roots[i].querySelectorAll('*')) {
+      if (el.shadowRoot) roots.push(el.shadowRoot);
+      if ((el.tagName === 'A' || el.tagName === 'AREA') && el.href === want) return true;
+    }
+  return false;
+}"""
+
+
+async def _link_on_page(page, url):
+    try:
+        return bool(await _eval_isolated(page, LINK_ON_PAGE_JS, url))
+    except Exception:
+        return False
+
+
+def _target_trusted(host, port):
+    """The owner listed this site with "approvals": false and confirmed it on
+    their phone this session (no new confirmation is started here)."""
+    key = trust.approvals_key(host, port, _site(host))
+    return bool(key) and trust.confirmed(key)
+
+
 async def _trust_ok(page, key, what, site=None):
     """True once the owner has confirmed a trusted-site entry this session.
     Asks them once; a refusal is remembered until the entry or session changes."""
@@ -1969,17 +2178,42 @@ async def type_text(request):
     return web.json_response(await _where(page))
 
 
+async def _eval_isolated(page, js, arg):
+    """Run `js` (a function source) on the page's main frame in a world of its
+    own: same DOM, but the page's scripts cannot replace the functions it
+    calls (getComputedStyle, checkVisibility, innerText) to make hidden text
+    look visible."""
+    cdp = await page.context.new_cdp_session(page)
+    try:
+        tree = await cdp.send("Page.getFrameTree")
+        world = await cdp.send("Page.createIsolatedWorld", {
+            "frameId": tree["frameTree"]["frame"]["id"], "worldName": "authyouragent-read"})
+        r = await cdp.send("Runtime.evaluate", {
+            "expression": f"({js})({json.dumps(arg)})", "contextId": world["executionContextId"],
+            "returnByValue": True, "awaitPromise": True})
+        if r.get("exceptionDetails"):
+            raise RuntimeError("reading the page failed: " +
+                               str(r["exceptionDetails"].get("exception", {}).get("description", ""))[:200])
+        return r["result"].get("value")
+    finally:
+        try:
+            await cdp.detach()
+        except Exception:
+            pass
+
+
 async def read(request):
     n = max(200, min(int(request.query.get("max_chars", 5000)), 20000))
     m = max(0, min(int(request.query.get("max_elements", 80)), 300))
     page = await V.attach()
-    text = await page.evaluate(READ_JS, n)
+    r = await _eval_isolated(page, READ_JS, n)
     m_ = MONEY_LOG.get(_site(urlparse(page.url).hostname))
     if m_:
         m_["read"] = True                # the agent has looked since the unanswered money click
-    out = {**await _where(page), "text": text[:n]}
+    out = {**await _where(page), "text": (r.get("text") or "")[:n],
+           "hidden": {"faint": r.get("faint", 0), "tiny": r.get("tiny", 0)}}
     if m:
-        out.update(await page.evaluate(ELEMENTS_JS, m))
+        out.update(await _eval_isolated(page, ELEMENTS_JS, m))
     return web.json_response(out)
 
 
