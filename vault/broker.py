@@ -901,6 +901,7 @@ class Vault:
         self.jobs = {}
         self.ledger = []             # what the vault decided this session, for the summary
         self.secrets_used = set()    # (item, host) the owner was told about this session
+        self.signed_in = set()       # sites (_site) signed in to this session: their values are private
         self._agent = None
         self.wba_key = None          # Ed25519 key, set once the cloud publishes it
         self.wba_agent = None        # Signature-Agent address (https://<label>.agents...)
@@ -1124,6 +1125,9 @@ class Vault:
                     and ev.get("resourceType") == "Document"):
                 hs.append({"name": "X-AuthYourAgent-Agent", "value": agent.oidc_header(req["url"])})
                 self.used = True
+                rp = urlparse(dict(parse_qsl(u.query)).get("redirect_uri", "")).hostname
+                if rp:
+                    self.signed_in.add(_site(rp))
                 _log(f"sign in with Auth Your Agent: proof added for {u.netloc}")
             if self.wba_key and self.wba_agent and u.scheme in ("http", "https"):
                 try:
@@ -1315,7 +1319,10 @@ class Vault:
             await self.start_chrome()
             self.used, self.hosts, self.origins, self.ledger = False, set(), set(), []
             self.secrets_used = set()
+            self.signed_in = set()
             self.captured = None
+            SEEN.clear()
+            SEEN_ADDR.clear()
             trust.reset()
             _save(SIGNED_IN_FILE, [])
             _log("session ended:", why, report)
@@ -1524,19 +1531,25 @@ async def navigate(request):
                                     site=re.sub(r"[^a-z0-9.-]", "", host) or "private"):
         return web.json_response({"error": "blocked", "detail":
             f"blocked by the vault: the owner has not confirmed {pkey} on their phone this session"}, status=403)
-    host_in = any(host == h or host.endswith("." + h) for h in CARRY_HOSTS)
     carries = _carries(url)
-    if host_in and ("?" in url or "#" in url or not CARRY_PATH_OK.match(urlparse(url).path)):
-        carries = carries or "data in its address, and this site accepts no data in addresses"
+    seen = _carries_seen(url)
+    if seen:
+        carries = f"'{seen[0]}', which the agent read on {seen[1]}"
     if carries and not await _link_on_page(page, url) and not _target_trusted(host, port):
         label = f"Open {host}"
         u = urlparse(url)
         data = (unquote_plus(u.query) + unquote(u.fragment)) or max(
             (unquote(s) for s in u.path.split("/")), key=len, default="")
+        if seen:
+            data = f"{seen[0]} (read on {seen[1]}), in: {url}"
         # the card warns the owner (data_out) and shows the data itself
         result = await _approve(page, label, site=_site(host), details={
             "label": label, "host": host, "data_out": len(data),
             "data": data[:597] + ("..." if len(data) > 597 else "")})
+        if result == "approved" and seen:
+            for e in SEEN.values():          # the owner said yes: that value may go there now
+                if e["show"] == seen[0]:
+                    e["hosts"].add(_bare(host))
         if result != "approved":
             return web.json_response({"error": "not_approved", "detail": (
                 f"the owner did not approve opening this address ({result}): it carries {carries}. "
@@ -2001,14 +2014,151 @@ def _hostport(url):
 # long path segment (a page that hides instructions may ask for exactly
 # that). Opening one asks the owner first, unless it is a link on the page
 # the agent is on (the same as clicking it) or a site the owner trusted.
-# Short values (a search, an id) open as before; this stops bulk copies, not
-# a value of a few words.
+# Short values (a search, an id) open as before; this stops bulk copies.
+# Short values the agent READ on another site (a gift card code, an order or
+# phone number, an email) are caught by the SEEN rule below instead.
 CARRY_QUERY = 120          # characters after ? and # together, decoded
 CARRY_SEGMENT = 80         # one path segment, decoded
-CARRY_HOSTS = ("sandbox.authyouragent.com",)   # hosts under these may carry no data at all
-CARRY_PATH_OK = re.compile(                     # and only the shop's own paths
-    r"^(/r/[A-Za-z0-9_-]{6,32}(/(reviews|account)?)?/?|"
-    r"/(healthz|alive|x|challenge(/.*)?|docs.*)?/?|/?)$")
+
+# ── Values the agent has seen ──
+# Every code, number and email the agent reads on a page of a site it is
+# signed in to this session (a saved login filled, a take over finished, an
+# Auth Your Agent sign-in, a password typed) is remembered with the hosts
+# that showed it (this session only, wiped by end_session). Public pages
+# add nothing: what anyone can read is not the owner's to leak. An
+# address the agent writes for ANY other host that contains one of them,
+# however short, in its host name, path, query or fragment, plain,
+# percent-encoded, base64 or hex, asks the owner (the red "data" card).
+# Search words are not values: a value has a digit, or is an email.
+SEEN = {}                  # normalised value -> {"show": as read, "hosts": set()}
+SEEN_ADDR = set()          # addresses written on pages the agent read (host+path+query, normalised)
+SEEN_MAX = 20000
+SEEN_CODE = re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9][A-Za-z0-9._/:-]{4,62}[A-Za-z0-9](?![A-Za-z0-9])")
+SEEN_PHONE = re.compile(r"\+?\d[\d \t().-]{5,22}\d")
+SEEN_EMAIL = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}")
+
+
+SEEN_URL = re.compile(r"(?i)\b(?:https?://)?((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24})"
+                      r"(?::\d{1,5})?([/?#][^\s\"'<>()\]]*)")
+
+
+def _bare(host):
+    host = (host or "").lower().rstrip(".")
+    return host[4:] if host.startswith("www.") else host
+
+
+def _norm(s):
+    return re.sub(r"[^0-9a-z]", "", unicodedata.normalize("NFKC", s).lower())
+
+
+DATE_LIKE = re.compile(r"(19|20)\d\d(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(\d{4,6})?|\d{1,2}(0\d|1[0-2])(19|20)\d\d")
+
+
+UNIT = re.compile(r"\d+(px|em|rem|pt|ms|kb|mb|gb|tb|kg|km|cm|mm|ml|hz|khz|mhz|ghz|mp|fps|am|pm|x|k|m|s|h|d)")
+
+
+def _is_value(n):
+    """A code or number worth keeping: 6+ characters with 2+ digits, either
+    all digits (7+, not a date) or mixed with 2+ letters (a gift card code,
+    an order or tracking number, a username with digits)."""
+    if len(n) < 6 or UNIT.fullmatch(n):
+        return False
+    digits = sum(ch.isdigit() for ch in n)
+    if n.isdigit():
+        return len(n) >= 7 and not DATE_LIKE.fullmatch(n)
+    return digits >= 2 and len(n) - digits >= 2
+
+
+def _addr_key(url):
+    u = urlparse(url if "://" in url else "https://" + url)
+    return _norm(_bare(u.hostname) + u.path.rstrip("/") + ("?" + u.query if u.query else ""))
+
+
+def _seen_add(host, text, links=()):
+    """Remember the addresses the page shows (its links and any address
+    written in its text), and, on a site the agent is signed in to, the
+    values in `text` (the owner's own data: public pages are public)."""
+    host = (host or "").lower()
+    if not host or not text:
+        return
+    for a in list(links) + [m.group(0) for m in SEEN_URL.finditer(text)]:
+        if len(SEEN_ADDR) < SEEN_MAX:
+            SEEN_ADDR.add(_addr_key(a))
+    if _site(host) not in getattr(V, "signed_in", ()):
+        return
+    found = []
+    spans = [(m.start(), m.end(), _bare(m.group(1))) for m in SEEN_URL.finditer(text)]
+
+    def written_for(i, j):
+        return {h for a, z, h in spans if a <= i and j <= z}
+
+    for m in SEEN_CODE.finditer(text):
+        for v in {m.group(0), *m.group(0).split("/")}:
+            n = _norm(v)
+            if _is_value(n):
+                found.append((n, v, written_for(m.start(), m.end())))
+    for m in SEEN_PHONE.finditer(text):
+        n = re.sub(r"\D", "", m.group(0))
+        if len(n) >= 7 and not DATE_LIKE.fullmatch(n):
+            found.append((n, m.group(0).strip(), written_for(m.start(), m.end())))
+    for m in SEEN_EMAIL.finditer(text):
+        found.append((_norm(m.group(0)), m.group(0), set()))
+    # a value written inside an address for site X (a search result, a link
+    # text) belongs to X too: opening X with it is following that address
+    for n, v, also in found:
+        e = SEEN.get(n)
+        if e is None:
+            if len(SEEN) >= SEEN_MAX:
+                SEEN.pop(next(iter(SEEN)))
+            e = SEEN[n] = {"show": v[:60], "hosts": set()}
+        e["hosts"].add(_bare(host))
+        e["hosts"].update(also)
+
+
+def _decodings(s):
+    """The address text, plus what its base64- and hex-looking runs decode to."""
+    out = [s]
+    blobs = []
+    for run in set(re.findall(r"[A-Za-z0-9+_-]{8,}", s)) | set(re.findall(r"[A-Za-z0-9+/]{8,}", s)):
+        alt = b"-_" if ("-" in run or "_" in run) else None
+        for i in range(4):          # a value may start mid-run (junk in front)
+            r = run[i:]
+            r = r[:-1] if len(r) % 4 == 1 else r
+            try:
+                blobs.append(base64.b64decode(r + "=" * (-len(r) % 4), altchars=alt, validate=True))
+            except Exception:
+                pass
+    for run in set(re.findall(r"[0-9a-fA-F]{8,}", s)):
+        for i in (0, 1):
+            r = run[i:]
+            try:
+                blobs.append(bytes.fromhex(r[:len(r) - len(r) % 2]))
+            except Exception:
+                pass
+    for b in blobs:
+        t = b.decode("utf-8", "ignore")
+        if len(t) >= 4:
+            out.append(t)
+    return out
+
+
+def _carries_seen(url):
+    """(value as read, source host) for a value read on another host that
+    this address carries, or None."""
+    u = urlparse(url)
+    host = _bare(u.hostname)
+    if not SEEN or _addr_key(url) in SEEN_ADDR:
+        return None         # a page the agent read shows this very address
+    raw = f"{host}/{u.path}?{u.query}#{u.fragment}"
+    text = unquote_plus(unquote_plus(raw))
+    hay = _norm(" ".join(_decodings(text) + _decodings(raw)))
+    digits = re.sub(r"\D", "", text)
+    for n, e in SEEN.items():
+        if host in e["hosts"]:
+            continue
+        if n in hay or (n.isdigit() and n in digits):
+            return e["show"], sorted(e["hosts"])[0]
+    return None
 
 
 def _carries(url):
@@ -2021,6 +2171,18 @@ def _carries(url):
     if longest > CARRY_SEGMENT:
         return f"a {longest}-character piece of data in its path"
     return ""
+
+
+LINKS_JS = r"""(max) => {
+  const out = new Set(), roots = [document];
+  for (let i = 0; i < roots.length && out.size < max; i++)
+    for (const el of roots[i].querySelectorAll('*')) {
+      if (el.shadowRoot) roots.push(el.shadowRoot);
+      if ((el.tagName === 'A' || el.tagName === 'AREA') && /^https?:/.test(el.href)) out.add(el.href);
+      if (out.size >= max) break;
+    }
+  return [...out];
+}"""
 
 
 LINK_ON_PAGE_JS = r"""(u) => {
@@ -2181,6 +2343,11 @@ async def type_text(request):
     sel = _ref_sel(body)
     await _find(page, sel)
     await page.fill(sel, str(body.get("text", "")), timeout=10000)
+    try:     # the agent typed a password itself: the site is signed in to
+        if await page.locator(sel).first.evaluate("e => (e.type || '').toLowerCase() === 'password'"):
+            V.signed_in.add(_site(urlparse(page.url).hostname))
+    except Exception:
+        pass
     if body.get("submit"):
         # Enter submits the field's form: same rule as clicking its submit button
         await _guarded(page, sel, lambda i: i["formSubmit"],
@@ -2226,6 +2393,12 @@ async def read(request):
            "hidden": {"faint": r.get("faint", 0), "tiny": r.get("tiny", 0)}}
     if m:
         out.update(await _eval_isolated(page, ELEMENTS_JS, m))
+    try:
+        links = await _eval_isolated(page, LINKS_JS, 2000)
+    except Exception:
+        links = []
+    _seen_add(urlparse(page.url).hostname, out["text"] + " " + out.get("title", "") + " " +
+              json.dumps(out.get("elements", ""), ensure_ascii=False), links)
     return web.json_response(out)
 
 
@@ -2366,6 +2539,11 @@ async def wait_for(request):
 async def screenshot(request):
     page = await V.attach()
     full = request.query.get("full") == "1"
+    try:      # the agent can read values off the picture too: remember them
+        _seen_add(urlparse(page.url).hostname, (await _eval_isolated(page, READ_JS, 20000)).get("text") or "",
+                  await _eval_isolated(page, LINKS_JS, 2000))
+    except Exception:
+        pass
     img = await page.screenshot(type="jpeg", quality=60, full_page=full, timeout=15000)
     if full and len(img) > 1_500_000:
         img = await page.screenshot(type="jpeg", quality=40, full_page=False, timeout=15000)
@@ -2447,6 +2625,7 @@ async def fill_secret(request):
         await el.fill("")
         return web.json_response({"error": "secrets", "detail": "the field changed while it was filled; cleared"}, status=400)
     site = urlparse(page.url).hostname or ""
+    V.signed_in.add(_site(site))
     await asyncio.to_thread(V.agent().report_status, "secret_filled", site, f"{name} ({field})")
     if field == "password":
         # a sign-in with the owner's saved login: their phone hears of it
@@ -2520,6 +2699,8 @@ async def _after_takeover(job, agent, site, result):
         result = "incomplete"
     if result != "done":
         V.captured = None               # cancelled / unfinished: nothing to keep
+    else:
+        V.signed_in.add(_site(urlparse(page.url).hostname or site or ""))
     V.note("takeover", (site or "").removeprefix("www."), result)
     await asyncio.to_thread(agent.report_status, f"takeover_{result}", site)
     return result

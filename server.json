@@ -8,12 +8,12 @@
     "url": "https://github.com/kjames2001/authyouragent",
     "source": "github"
   },
-  "version": "0.3.31",
+  "version": "0.3.33",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "authyouragent",
-      "version": "0.3.31",
+      "version": "0.3.33",
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {

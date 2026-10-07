@@ -2,6 +2,18 @@
 
 Every release of the Python SDK, MCP server and browser vault (`authyouragent` on PyPI, `ghcr.io/kjames2001/authyouragent-vault`), with the changes to the service at authyouragent.com that shipped alongside it. Newest first. Versions are tagged `py-vX.Y.Z` (PyPI) and `js-vX.Y.Z` (npm).
 
+## 0.3.33 (2026-10-07)
+
+### An address cannot carry the owner's data out, however short
+- On any site the agent is signed in to this session (it filled a saved login, typed a password, finished a take over, or signed in with Auth Your Agent), the vault remembers every code, number and email the agent reads there: gift card codes, order and phone numbers, account emails. It remembers the same for screenshots.
+- If the agent then writes an address for any other site that carries one of those values, the owner gets the red "Possibly unsafe" card first, however short the value is. The vault looks in the host name, path, query and fragment, and through percent-encoding, base64 and hex. The card shows the value and the site it came from.
+- Before, only long addresses (over 120 characters of data) asked, so a gift card code or a phone number fitted under the limit. The public break-my-vault challenge found this. 0.3.32 closed it for the challenge site only; 0.3.33 closes it everywhere and drops the special case.
+- What still opens without a card: links on the current page, any address a page the agent read shows, a site's own values sent back to that site, searches after reading public pages (public pages add nothing), and anything the owner already approved for that site in the same session. Everything is forgotten when the session ends.
+- The cost: after reading a signed-in page, a search on another site that repeats a code or number from that page (an order number, a version number) asks. We measured 18 of 33 such searches asking on signed-in pages, and 0 of 951 link addresses and 0 of 33 searches after public pages.
+
+## 0.3.32 (2026-10-07, image only)
+- The sandbox challenge host accepted no data in addresses. Superseded by 0.3.33; never published to PyPI or `:latest`.
+
 ## 0.3.31 (2026-10-06)
 
 ### The vault on another machine
