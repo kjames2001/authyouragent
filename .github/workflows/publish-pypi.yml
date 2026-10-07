@@ -1,20 +1,30 @@
 # Publish the Python SDK to PyPI with trusted publishing (no token stored).
 # Trigger: push a tag like `py-v0.3.0`. The tag must match sdk/pyproject.toml.
+# Manual run (Actions tab, "Run workflow"): builds and checks only, never publishes;
+# pick a runner image to try a new one before `ubuntu-latest` moves to it.
 name: Publish Python SDK
 
 on:
   push:
     tags: ["py-v*"]
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "Runner image for the build check"
+        default: ubuntu-latest
+        type: choice
+        options: [ubuntu-latest, ubuntu-24.04, ubuntu-26.04]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Check the tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/py-v')
         run: |
           v=$(python -c "import tomllib;print(tomllib.load(open('sdk/pyproject.toml','rb'))['project']['version'])")
           [ "py-v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME != version $v"; exit 1; }
@@ -23,19 +33,32 @@ jobs:
           python -m pip install --upgrade build twine
           python -m build sdk
           twine check sdk/dist/*
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: sdk/dist/
 
+  check-download:
+    # manual runs only: proves the artifact round trip works with these action versions
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - run: ls -la dist/ && test -n "$(ls dist/*.whl)" && test -n "$(ls dist/*.tar.gz)"
+
   publish:
+    if: startsWith(github.ref, 'refs/tags/py-v')
     needs: build
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       id-token: write     # trusted publishing
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
