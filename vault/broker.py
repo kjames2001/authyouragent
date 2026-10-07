@@ -2010,17 +2010,21 @@ async def _watched(page, label, act):
 # the moment of the click (a submit handler that rewrites the form's action,
 # or a fetch() to another site). So from the click until the page has loaded
 # a new document (at most PIN_HOLD_S), the vault blocks every send to a site
-# that was not on the card (or whose script or frame the page had already
-# loaded before the card): any method but GET, pings and beacons, and a page
-# load of another site that carries a query (a GET form re-pointed elsewhere
-# puts its fields there). A redirect the card's site answers with is its own
-# choice and goes through; a plain page load of another site (no query) does
-# too, since what it can carry is the address, which the 0.3.33 rule covers.
+# that was not on the card (or that the page already loaded files from before
+# the card): any method but GET, pings and beacons, and any GET to such a site
+# that carries a query (an image or page load with the data in its address,
+# or a GET form re-pointed elsewhere). A redirect the card's site answers with
+# is its own choice and goes through; a GET with no query does too.
+# The limit: a hostile page's own script can read what the agent types and
+# send it at any other time. The pin is about the approval: the click the
+# owner approved cannot be sent somewhere the card did not show.
 PIN_HOLD_S = 10.0           # longest a pin stays on after the click
 
 
+# hosts the page already loaded files from (scripts, frames, images, styles,
+# fonts) before the card. Not what it fetched or beaconed: those are sends.
 LOADED_JS = """() => [...new Set(performance.getEntriesByType('resource')
-  .filter(e => e.initiatorType === 'script' || e.initiatorType === 'iframe')
+  .filter(e => !['fetch', 'xmlhttprequest', 'beacon', 'other'].includes(e.initiatorType))
   .map(e => { try { return new URL(e.name).hostname } catch (x) { return '' } }))]"""
 
 
@@ -2043,7 +2047,9 @@ def _pin(page, details, act, loaded=()):
             return True                      # the card's site sent the browser on: not the page's script
         if req.method.upper() not in ("GET", "HEAD") or req.resource_type in ("ping", "beacon"):
             return False
-        return not (req.is_navigation_request() and req.frame == main and u.query)
+        # a GET carries data in its address: an image, a script or a page
+        # load of another site with a query (new Image().src = "...?d=...")
+        return not u.query
 
     async def handler(route, req):
         if state["done"]:
