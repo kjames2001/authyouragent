@@ -2,6 +2,15 @@
 
 Every release of the Python SDK, MCP server and browser vault (`authyouragent` on PyPI, `ghcr.io/kjames2001/authyouragent-vault`), with the changes to the service at authyouragent.com that shipped alongside it. Newest first. Versions are tagged `py-vX.Y.Z` (PyPI) and `js-vX.Y.Z` (npm).
 
+## 0.3.34 (2026-10-07)
+
+### An approved click can send only where the card said
+- The vault already re-read the page after the owner's tap: the amount, the text and where the form sends. A script could still change where data goes at the moment of the click, after that read: a submit handler that rewrites the form's address, or a `fetch()` or beacon to another site.
+- Now, from an approved click until the page has loaded its next document (at most 10 s), the vault blocks every send to a site that was not on the card: any request but GET, pings and beacons, and a page load of another site that carries data in its query. The click itself still happens; what the page tries to send elsewhere does not.
+- Still allowed: the page's own site, the site the form sends to on the card (a payment provider), sites whose script or frame the page had already loaded before the card (a provider's card field sends to its own API), a redirect the site itself answers with, and the new page's own requests once it has loaded.
+- A blocked send is listed in the owner's end-of-session summary: "Blocked, sent to a site not on the card".
+- Found by a Reddit commenter (Acrid) asking about a form whose address is set by script at submit time.
+
 ## 0.3.33 (2026-10-07)
 
 ### An address cannot carry the owner's data out, however short

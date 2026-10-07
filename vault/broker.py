@@ -1371,7 +1371,8 @@ class Vault:
             lines.append("Sites: " + ", ".join(sites[:8]) + (f" (+{len(sites) - 8})" if len(sites) > 8 else ""))
         groups = [("approved", "You approved"), ("denied", "You denied"),
                   ("expired", "No answer, not done"), ("auto", "Went through by your approval mode"),
-                  ("unknown", "Clicked, the site never answered"), ("takeover", "Take over"),
+                  ("unknown", "Clicked, the site never answered"),
+                  ("blocked", "Blocked, sent to a site not on the card"), ("takeover", "Take over"),
                   ("secret", "Saved logins used")]
         for kind, head in groups:
             items = [f"{w}{' ' + x if x else ''} ({s})" for k, s, w, x in self.ledger if k == kind]
@@ -2004,6 +2005,87 @@ async def _watched(page, label, act):
         await page.unroute("**/*", handler)
 
 
+# An approved click may send only where the card said. The page is re-read
+# after the owner's tap, but a script can still change where data goes at
+# the moment of the click (a submit handler that rewrites the form's action,
+# or a fetch() to another site). So from the click until the page has loaded
+# a new document (at most PIN_HOLD_S), the vault blocks every send to a site
+# that was not on the card (or whose script or frame the page had already
+# loaded before the card): any method but GET, pings and beacons, and a page
+# load of another site that carries a query (a GET form re-pointed elsewhere
+# puts its fields there). A redirect the card's site answers with is its own
+# choice and goes through; a plain page load of another site (no query) does
+# too, since what it can carry is the address, which the 0.3.33 rule covers.
+PIN_HOLD_S = 10.0           # longest a pin stays on after the click
+
+
+LOADED_JS = """() => [...new Set(performance.getEntriesByType('resource')
+  .filter(e => e.initiatorType === 'script' || e.initiatorType === 'iframe')
+  .map(e => { try { return new URL(e.name).hostname } catch (x) { return '' } }))]"""
+
+
+def _pin(page, details, act, loaded=()):
+    """`act` wrapped so that, while it runs, data leaves only for the card's
+    site(s). `loaded`: hosts the page already ran scripts or frames from before
+    the card (a payment provider's script sends the card to its own API)."""
+    page_site = _site(urlparse(page.url).hostname)
+    ok = {page_site} | ({_site(details["target_host"])} if details.get("target_host") else set()) \
+        | {_site(h) for h in loaded if h}
+    blocked = []
+    state = {"nav": False, "done": False}
+    main = page.main_frame
+
+    def allowed(req):
+        u = urlparse(req.url)
+        if u.scheme not in ("http", "https") or _site(u.hostname) in ok:
+            return True
+        if req.redirected_from is not None:
+            return True                      # the card's site sent the browser on: not the page's script
+        if req.method.upper() not in ("GET", "HEAD") or req.resource_type in ("ping", "beacon"):
+            return False
+        return not (req.is_navigation_request() and req.frame == main and u.query)
+
+    async def handler(route, req):
+        if state["done"]:
+            return await route.fallback()
+        if allowed(req):
+            if req.is_navigation_request() and req.frame == main:
+                state["nav"] = True          # a new document is on its way
+            return await route.fallback()
+        host = (urlparse(req.url).hostname or "?").lower()
+        if host not in blocked:
+            blocked.append(host)
+            _log("approved click: blocked a send to a site not on the card:", req.method, host)
+            V.note("blocked", host, f"send during '{details.get('label') or 'click'}'")
+        await route.abort("blockedbyclient")
+
+    def navigated(frame):
+        # a new document committed (not a pushState: that sends no request);
+        # the old page's scripts are gone, and the new page is the card's site's answer
+        if frame == main and state["nav"]:
+            state["done"] = True
+
+    async def release():
+        deadline = time.monotonic() + PIN_HOLD_S
+        while not state["done"] and time.monotonic() < deadline and not page.is_closed():
+            await asyncio.sleep(0.1)
+        state["done"] = True
+        try:
+            page.remove_listener("framenavigated", navigated)
+            await page.unroute("**/*", handler)
+        except Exception:
+            pass
+
+    async def pinned():
+        page.on("framenavigated", navigated)
+        await page.route("**/*", handler)
+        try:
+            return await act()
+        finally:
+            asyncio.create_task(release())
+    return pinned
+
+
 def _hostport(url):
     u = urlparse(url)
     return (u.hostname or "").lower(), u.port or {"https": 443, "http": 80}.get(u.scheme)
@@ -2270,6 +2352,10 @@ async def _guarded(page, selector, label_of, act, submits_form):
                                     if prev["unknown"] else ""))
         PLAN_TXN.pop(page, None)
         approved_url = page.url
+        try:
+            loaded = await page.evaluate(LOADED_JS)    # read before the card: what the page already runs
+        except Exception:
+            loaded = []
         result = await _approve(page, label, details=details)
         if result != "approved":
             PLAN_TXN.pop(page, None)
@@ -2291,6 +2377,9 @@ async def _guarded(page, selector, label_of, act, submits_form):
         if moved:
             await _plan_result(page, "failed")
             raise NotApproved(f"{moved} after approval; not clicked. Ask again.")
+        # and while the click runs, nothing may be sent to a site the card did
+        # not show, except those whose code the page was already running
+        act = _pin(page, details, act, loaded)
         if not money:
             if page not in PLAN_TXN:
                 return await act()
