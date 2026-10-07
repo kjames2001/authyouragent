@@ -1525,8 +1525,9 @@ async def navigate(request):
         return web.json_response({"error": "blocked", "detail":
             f"blocked by the vault: the owner has not confirmed {pkey} on their phone this session"}, status=403)
     host_in = any(host == h or host.endswith("." + h) for h in CARRY_HOSTS)
-    carries = _carries(url) or (host_in and ("?" in url or "#" in url
-                                             or not CARRY_PATH_OK.match(urlparse(url).path)))
+    carries = _carries(url)
+    if host_in and ("?" in url or "#" in url or not CARRY_PATH_OK.match(urlparse(url).path)):
+        carries = carries or "data in its address, and this site accepts no data in addresses"
     if carries and not await _link_on_page(page, url) and not _target_trusted(host, port):
         label = f"Open {host}"
         u = urlparse(url)
