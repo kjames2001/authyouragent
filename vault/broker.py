@@ -1524,7 +1524,9 @@ async def navigate(request):
                                     site=re.sub(r"[^a-z0-9.-]", "", host) or "private"):
         return web.json_response({"error": "blocked", "detail":
             f"blocked by the vault: the owner has not confirmed {pkey} on their phone this session"}, status=403)
-    carries = _carries(url)
+    host_in = any(host == h or host.endswith("." + h) for h in CARRY_HOSTS)
+    carries = _carries(url) or (host_in and ("?" in url or "#" in url
+                                             or not CARRY_PATH_OK.match(urlparse(url).path)))
     if carries and not await _link_on_page(page, url) and not _target_trusted(host, port):
         label = f"Open {host}"
         u = urlparse(url)
@@ -2002,6 +2004,10 @@ def _hostport(url):
 # a value of a few words.
 CARRY_QUERY = 120          # characters after ? and # together, decoded
 CARRY_SEGMENT = 80         # one path segment, decoded
+CARRY_HOSTS = ("sandbox.authyouragent.com",)   # hosts under these may carry no data at all
+CARRY_PATH_OK = re.compile(                     # and only the shop's own paths
+    r"^(/r/[A-Za-z0-9_-]{6,32}(/(reviews|account)?)?/?|"
+    r"/(healthz|alive|x|challenge(/.*)?|docs.*)?/?|/?)$")
 
 
 def _carries(url):
