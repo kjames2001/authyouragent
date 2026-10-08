@@ -2157,15 +2157,105 @@ def _is_value(n):
     return digits >= 2 and len(n) - digits >= 2
 
 
+# ── Phrases the agent has seen (0.3.36) ──
+# Codes and numbers are not the only private data on a signed-in page: the
+# owner's name, street, company or delivery note are words, and an address
+# the agent writes can carry them in a few characters (?n=Kagiso+Owner).
+# On a page of a site the agent is signed in to, these short phrases are
+# remembered too and held exactly like the values above:
+#   - the text after a personal label ("Name:", "Address:", "Deliver to:",
+#     "Note:" ...), any case, 2-10 words, and each comma part of it, and any
+#     run of 2-5 Capitalised words inside it (the name in "Leave it with
+#     Neo Kgosi");
+#   - a line, or a comma part of one, written as a proper name: 2-6 words,
+#     each Capitalised (or a number), not all of them common page words
+#     ("Order History", "Home & Living" are page furniture, not the owner's),
+#     and within 3 lines of an email or phone number (the details block; a
+#     product heading elsewhere on the page is the shop's, not the owner's).
+# A phrase needs 8+ letters once spaces and signs are dropped, so it cannot
+# match by chance inside an ordinary address. Words in the site's own links
+# and buttons are never phrases: following the site's menu is not a leak.
+PHRASE_LABEL = re.compile(
+    r"(?im)^\s*(?:full\s+)?(name|address|street|city|town|suburb|postcode|zip|ship(?:ping)?\s+to|bill(?:ing)?\s+to|"
+    r"deliver(?:y)?(?:\s+to|\s+address|\s+note|\s+instructions)?|recipient|company|employer|note|notes|"
+    r"instructions|contact|account\s+holder|card\s*holder|nickname|username|display\s+name|first\s+name|"
+    r"last\s+name|surname|date\s+of\s+birth|birthday)\s*[:\-\u2013]\s*(.{3,80})$")
+PHRASE_WORD = re.compile(r"[^\W_]+(?:['\u2019.-][^\W_]+)*")
+PAGE_WORDS = set("""a an and the of for to in on at by with from your my our you we us me all new more
+account accounts settings setting profile profiles home living shop store stores cart basket bag checkout order
+orders history wishlist wish list lists saved items item products product reviews review help support contact
+contacts sign signed signin login log logout out in up register create password security privacy policy terms
+service services payment payments methods method gift card cards balance address addresses book delivery
+shipping returns return refund refunds track tracking customer customers care about us faq news blog search
+results menu main page pages next previous back top bottom view all more less edit save cancel delete remove
+add update change manage close open details detail summary total subtotal tax price prices sale deals deal
+offers offer today new arrivals best sellers seller top rated popular trending featured recommended for you
+categories category department departments brands brand men women kids baby garden kitchen office electronics
+books music movies games toys sports outdoors health beauty fashion clothing shoes jewelry home decor lighting
+lamps lamp furniture tools auto grocery pet pets notifications messages inbox dashboard overview activity
+recent your orders prime membership subscriptions subscription rewards points coupons coupon vouchers voucher
+language currency region country united states kingdom english free shipping express standard secure
+community forum forums questions answers question answer report share like follow followers following
+home page privacy notice cookie cookies preferences accessibility careers press investors legal copyright
+rights reserved inc ltd llc co website site web app apps download mobile desktop email phone mail post
+first last name full street city state zip postal code number date birth day month year time
+information info type types submit bug bugs report issue issues""".split())
+
+
+def _phrase_ok(words):
+    letters = sum(len(re.sub(r"\d", "", w)) for w in words)
+    return 2 <= len(words) <= 10 and letters >= 8 and any(w.lower() not in PAGE_WORDS for w in words if not w.isdigit())
+
+
+CAP_RUN = re.compile(r"(?<![\w'])(?:[A-Z][^\W\d_]+[ \t]+){1,4}[A-Z][^\W\d_]+(?![\w'])")
+
+
+def _phrases(text, furniture=()):
+    """Short phrases on a signed-in page that are probably the owner's own
+    words (see above): [(normalised, as read)]. A name inside a phrase
+    ("Leave it with Neo Kgosi") is kept on its own too."""
+    out = []
+
+    def take(part, cap_only=False):
+        words = PHRASE_WORD.findall(part)
+        if _phrase_ok(words) and not cap_only:
+            out.append(part.strip())
+        for m in CAP_RUN.finditer(part):
+            if m.start() == 0 and m.group(0) != part.strip():
+                continue                  # "Leave it ..." starts a sentence: not a name
+            if _phrase_ok(PHRASE_WORD.findall(m.group(0))):
+                out.append(m.group(0))
+
+    for m in PHRASE_LABEL.finditer(text):
+        for part in [m.group(2)] + m.group(2).split(","):
+            take(part)
+    lines = [ln.strip() for ln in text.splitlines()]
+    near = set()                     # lines within 3 of an email or phone: the owner's details block
+    for i, ln in enumerate(lines):
+        if SEEN_EMAIL.search(ln) or SEEN_PHONE.search(ln):
+            near.update(range(i - 3, i + 4))
+    for i, line in enumerate(lines):
+        if i not in near or not line or len(line) > 80 or ":" in line or "|" in line:
+            continue
+        for part in [line] + line.split(","):
+            words = PHRASE_WORD.findall(part)
+            if (2 <= len(words) <= 6 and _phrase_ok(words)
+                    and all(w[0].isupper() or w[0].isdigit() for w in words)):
+                out.append(part.strip())
+    furn = {_norm(f) for f in furniture}
+    return [(_norm(p), p) for p in dict.fromkeys(out) if _norm(p) not in furn and len(_norm(p)) >= 8]
+
+
 def _addr_key(url):
     u = urlparse(url if "://" in url else "https://" + url)
     return _norm(_bare(u.hostname) + u.path.rstrip("/") + ("?" + u.query if u.query else ""))
 
 
-def _seen_add(host, text, links=()):
+def _seen_add(host, text, links=(), furniture=()):
     """Remember the addresses the page shows (its links and any address
     written in its text), and, on a site the agent is signed in to, the
-    values in `text` (the owner's own data: public pages are public)."""
+    values and phrases in `text` (the owner's own data: public pages are
+    public). `furniture`: the page's link and button labels."""
     host = (host or "").lower()
     if not host or not text:
         return
@@ -2191,6 +2281,8 @@ def _seen_add(host, text, links=()):
             found.append((n, m.group(0).strip(), written_for(m.start(), m.end())))
     for m in SEEN_EMAIL.finditer(text):
         found.append((_norm(m.group(0)), m.group(0), set()))
+    for n, v in _phrases(text, furniture):
+        found.append((n, v, set()))
     # a value written inside an address for site X (a search result, a link
     # text) belongs to X too: opening X with it is following that address
     for n, v, also in found:
@@ -2492,8 +2584,9 @@ async def read(request):
         links = await _eval_isolated(page, LINKS_JS, 2000)
     except Exception:
         links = []
-    _seen_add(urlparse(page.url).hostname, out["text"] + " " + out.get("title", "") + " " +
-              json.dumps(out.get("elements", ""), ensure_ascii=False), links)
+    _seen_add(urlparse(page.url).hostname, out["text"] + "\n" + out.get("title", "") + "\n" +
+              json.dumps(out.get("elements", ""), ensure_ascii=False), links,
+              [e.get("label", "") for e in out.get("elements") or [] if isinstance(e, dict)])
     return web.json_response(out)
 
 

