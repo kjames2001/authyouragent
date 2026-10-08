@@ -2,6 +2,15 @@
 
 Every release of the Python SDK, MCP server and browser vault (`authyouragent` on PyPI, `ghcr.io/kjames2001/authyouragent-vault`), with the changes to the service at authyouragent.com that shipped alongside it. Newest first. Versions are tagged `py-vX.Y.Z` (PyPI) and `js-vX.Y.Z` (npm).
 
+## 0.3.37 (2026-10-09)
+
+### A revoked agent's copied key list stops counting within an hour
+- Each agent's key list carries the vault's own proof (Web Bot Auth, draft Appendix B). A site that fetches the list from the agent's address already dropped a revoked agent within five minutes (`max-age=300`). A copy of the list passed on some other way is trusted until the proof expires, and the proof lasted 7 days.
+- The proof now lasts one hour, and the vault re-signs it every 15 minutes (it was every 2 days). The key and the agent's address do not change.
+- If the owner's machine is off for more than an hour, the proof lapses and the list serves no key until the vault starts again. The vault re-signs on start, so its own requests are never sent without a valid list.
+- The vault logs its signing address once instead of on every re-sign.
+- Raised by Kaveh Ranjbar on the IETF web-bot-auth list.
+
 ## 0.3.36 (2026-10-08)
 
 ### Short wordy data cannot leave in an address either

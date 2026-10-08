@@ -969,9 +969,11 @@ class Vault:
             self.wba_next = time.time() + 3600        # no agent credentials
             return
         try:
+            before = self.wba_agent
             self.wba_key, self.wba_agent = await asyncio.to_thread(self._wba_publish)
-            self.wba_next = time.time() + 2 * 86400   # the proof is good for 7 days
-            _log("web bot auth: signing requests as", self.wba_agent)
+            self.wba_next = time.time() + 900         # the proof lasts an hour: re-sign every 15 min
+            if self.wba_agent != before:
+                _log("web bot auth: signing requests as", self.wba_agent)
         except Exception as e:
             self.wba_next = time.time() + 600
             _log("web bot auth not ready:", str(e)[:200])

@@ -28,7 +28,8 @@ DIRECTORY_TAG = "http-message-signatures-directory"
 WELL_KNOWN = "/.well-known/http-message-signatures-directory"
 MEDIA_TYPE = "application/http-message-signatures-directory+json"
 REQUEST_LIFETIME = 300          # seconds a request signature stays valid
-DIRECTORY_LIFETIME = 7 * 86400  # seconds the directory's possession proof stays valid
+DIRECTORY_LIFETIME = 3600      # seconds the directory's possession proof stays valid: a copy of the
+                               # key list passed on elsewhere stops counting an hour after a revoke
 
 
 def b64u(b):
