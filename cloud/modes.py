@@ -302,6 +302,13 @@ def clean_details(d):
             out[k] = True
     # vault 0.3.30+: the agent is opening an address it wrote that carries
     # this many characters of data; the card warns the owner
+    # vault 0.3.38+: the agent reached this site through a sponsored listing
+    # shown on that host earlier in the session; the card says so (amber)
+    sp = d.get("sponsored")
+    if isinstance(sp, dict):
+        sh = sp.get("site")
+        if isinstance(sh, str) and HOST_RE.match(sh.strip().lower()) and len(sh) <= 253:
+            out["sponsored"] = {"site": sh.strip().lower()}
     n = d.get("data_out")
     if isinstance(n, int) and not isinstance(n, bool) and 0 < n <= 1_000_000:
         out["data_out"] = n
