@@ -29,6 +29,7 @@ It does not tell you who the owner is. Agent addresses are random and carry no p
 
 Any Web Bot Auth verifier works. The verifier reads `Signature-Agent`, fetches the key list from that address and checks the signature. Trust the agent addresses under `agents.authyouragent.com` to accept only Auth Your Agent agents.
 
+- **Python:** `webbotauth.verify` in our SDK (`pip install authyouragent`, version 0.3.39 or later). It checks any agent's signature, not only ours. See below.
 - **Node.js, Cloudflare Workers:** Cloudflare's [`web-bot-auth`](https://www.npmjs.com/package/web-bot-auth) package. Our own tests verify vault requests with it.
 - **Caddy:** Cloudflare's [Caddy plugin](https://github.com/cloudflare/web-bot-auth/tree/main/examples/caddy-plugin).
 - **Apache:** [web-bot-auth-apache](https://github.com/garyillyes/web-bot-auth-apache).
@@ -47,6 +48,37 @@ await verify(request, {
 });
 // verified: `agent` is the agent's stable address
 ```
+
+### Python
+
+```python
+from authyouragent import webbotauth
+
+result = webbotauth.verify(request)       # Starlette/FastAPI, Flask or Django request
+if result.verified:
+    agent = result.agent                  # the address its keys came from
+```
+
+`result.outcome` is one of four values:
+
+- `verified`: the signature checks out against a key the agent's address publishes. `result.agent` is that address (its key-list URL). Log, rate-limit, allow or block by it.
+- `invalid`: the signature is wrong, expired, made for another page or method, or made with a published test key.
+- `unverified`: there was not enough to decide. For example, the key list could not be fetched or does not hold the key. This says nothing bad about the agent, so treat the request as you would an unsigned one.
+- `unsigned`: the request has no Web Bot Auth signature.
+
+`result.reason` says why in plain words. To accept only Auth Your Agent agents, also check that `result.agent` is under `https://` and `.agents.authyouragent.com/`.
+
+The first request from a new agent fetches its key list over the network. In async code, call `await asyncio.to_thread(webbotauth.verify, request)`. Without a framework, pass the parts instead: `webbotauth.verify(method="GET", url="https://shop.example/p/1?x=2", headers=headers)`. Use the URL as the client sent it.
+
+What it does for you:
+
+- **Any agent:** it follows the draft's rules for every address, not only ours. It accepts Ed25519, RSA-PSS and ECDSA keys, a `directory` or `jwks_uri` key list, and both header forms (`sig1="https://…"` and the older plain string).
+- **Agent addresses:** it pairs each key with the address it was fetched from. A request that uses one agent's key but names another agent's address is not attributed to either.
+- **Fetching key lists safely:** each key list is fetched over HTTPS from a public address only, never from your internal network. Fetches give up after 5 seconds and 64 kB, and redirects are not followed.
+- **Caching:** key lists are cached as their `Cache-Control` says, and at least 60 seconds. If an agent's key list fails to load, the last good copy is used for up to a day and the result is marked `stale`.
+- **Refused signatures:** shared secrets (`hmac-sha256`), the published RFC 9421 example keys, and signatures valid for more than 24 hours are refused.
+
+To change these limits, create your own `webbotauth.Verifier(...)` and call its `verify` method. One verifier per process is enough.
 
 Fetch each key list from the agent's address yourself, and cache it for no longer than its `Cache-Control` allows (five minutes). That is what makes a revoke reach you within five minutes. A list that fails to load says nothing about the agent: treat the request as unverified rather than as revoked.
 

@@ -22,6 +22,11 @@ Quick start (site)::
     verifier = SiteVerifier("https://authyouragent.com")
     auth = verifier.verify(request)      # raises AuthError
 
+Checking any agent's Web Bot Auth signature (site)::
+
+    from authyouragent import webbotauth
+    result = webbotauth.verify(request)  # .outcome: verified / invalid / unverified / unsigned
+
 Documentation: https://authyouragent.com/docs
 """
 
@@ -30,5 +35,5 @@ from .site import SiteVerifier, AuthError, Auth
 
 __all__ = ["AgentClient", "AgentError", "keygen", "agent_jwk",
            "SiteVerifier", "AuthError", "Auth"]
-__version__ = "0.3.38"
+__version__ = "0.3.39"
 DEFAULT_CLOUD = "https://authyouragent.com"
