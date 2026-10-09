@@ -109,7 +109,7 @@ The vault needs Docker. `vault up` prints the settings for your MCP configuratio
 }
 ```
 
-Node-based MCP clients can use `"command": "npx", "args": ["authyouragent-mcp"]` with the same settings.
+Node-based MCP clients can use `"command": "npx", "args": ["authyouragent-mcp"]` with the same settings. For OpenClaw and Hermes Agent, see [OpenClaw and Hermes Agent](/docs/developers/openclaw-hermes).
 
 ### Your tools
 

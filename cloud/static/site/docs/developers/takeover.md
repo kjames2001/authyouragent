@@ -35,6 +35,8 @@ The vault needs Docker. `vault up` starts it on `127.0.0.1:7801` with every prot
 
 `AYA_AGENT_ID` and the key come from adding the agent in the app (**Agents → Add an agent**). Node-based clients can use `npx authyouragent-mcp` instead of `authyouragent-mcp`.
 
+OpenClaw and Hermes Agent have a ready skill and plugin that keep the agent on the vault and waiting through approvals: see [OpenClaw and Hermes Agent](/docs/developers/openclaw-hermes).
+
 ### The vault on another machine
 
 By default the vault answers only on the machine it runs on. An agent that runs as root, or as the same user, on that machine can read the vault's files: the password manager login, the agent key and the token. The vault keeps passwords out of what the agent is shown, which stops a tricked agent; it does not stop an agent that goes looking on its own machine. To keep those files away from the agent, run the vault on a machine the agent cannot log in to, and connect over the network:
