@@ -12,6 +12,8 @@ pip install "authyouragent[mcp]"
 authyouragent vault up --agent-id ag_... --key /path/to/agent-key.pem
 ```
 
+For browser-use and Goose, see [browser-use and Goose](/docs/developers/browser-use-goose).
+
 `vault up` prints the values used below. `AYA_AGENT_ID` and the key come from **Agents → Add an agent** in the app. The env values are file paths and an id, not secrets. See [Take over](/docs/developers/takeover) for a vault on another machine.
 
 ## OpenClaw
