@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       Auth Your Agent
  * Plugin URI:        https://authyouragent.com/for-shops
- * Description:       Let AI assistants sign in as your customer's approved agent and complete orders. The customer approves the sign-in, and each WooCommerce payment, on their phone.
- * Version:           0.1.0
+ * Description:       Let AI assistants sign in as your customer's approved agent and complete orders. The customer approves the sign-in, and each WooCommerce payment, on their phone. Recognises any agent that signs its requests (Web Bot Auth).
+ * Version:           0.2.0
  * Requires at least: 6.4
  * Requires PHP:      7.4
  * Author:            Auth Your Agent
@@ -15,7 +15,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'AYA_VERSION', '0.1.0' );
+define( 'AYA_VERSION', '0.2.0' );
 define( 'AYA_DIR', plugin_dir_path( __FILE__ ) );
 
 require_once AYA_DIR . 'includes/class-aya-jwt.php';
@@ -24,6 +24,8 @@ require_once AYA_DIR . 'includes/class-aya-login.php';
 require_once AYA_DIR . 'includes/class-aya-logout.php';
 require_once AYA_DIR . 'includes/class-aya-checkout.php';
 require_once AYA_DIR . 'includes/class-aya-settings.php';
+require_once AYA_DIR . 'includes/class-aya-wba.php';
+require_once AYA_DIR . 'includes/class-aya-wba-site.php';
 
 /** Plugin settings with defaults. */
 function aya_opt( $key ) {
@@ -35,6 +37,9 @@ function aya_opt( $key ) {
 		'button_label'  => __( 'Sign in with Auth Your Agent', 'authyouragent' ),
 		'role'          => '',
 		'confirm_orders' => '1',
+		'wba'            => '1',
+		'wba_mode'       => 'all',
+		'wba_refuse_invalid' => '0',
 	);
 	return isset( $o[ $key ] ) && '' !== $o[ $key ] ? $o[ $key ] : ( isset( $d[ $key ] ) ? $d[ $key ] : '' );
 }
@@ -62,10 +67,15 @@ AYA_Login::init();
 AYA_Logout::init();
 AYA_Checkout::init();
 AYA_Settings::init();
+AYA_WBA_Site::init();
 
 register_uninstall_hook( __FILE__, 'aya_uninstall' );
 function aya_uninstall() {
 	delete_option( 'aya_settings' );
 	delete_transient( 'aya_discovery' );
 	delete_transient( 'aya_jwks' );
+	delete_option( 'aya_wba_seen' );
+	delete_option( 'aya_wba_rules' );
+	global $wpdb;
+	$wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '\\_transient\\_%aya\\_wba%' OR option_name LIKE '\\_transient\\_timeout\\_%aya\\_wba%'" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 }

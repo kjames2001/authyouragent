@@ -22,6 +22,12 @@ class AYA_Checkout {
 		add_action( 'woocommerce_checkout_order_created', array( __CLASS__, 'note' ) );
 		add_action( 'woocommerce_store_api_checkout_order_processed', array( __CLASS__, 'note' ) );
 		add_action( 'woocommerce_admin_order_data_after_order_details', array( __CLASS__, 'admin_badge' ) );
+		// orders list: classic (posts) and HPOS screens
+		add_filter( 'manage_edit-shop_order_columns', array( __CLASS__, 'column' ) );
+		add_action( 'manage_shop_order_posts_custom_column', array( __CLASS__, 'column_cell_post' ), 10, 2 );
+		add_filter( 'manage_woocommerce_page_wc-orders_columns', array( __CLASS__, 'column' ) );
+		add_action( 'manage_woocommerce_page_wc-orders_custom_column', array( __CLASS__, 'column_cell' ), 10, 2 );
+		add_action( 'admin_head', array( __CLASS__, 'badge_css' ) );
 	}
 
 	private static function applies() {
@@ -159,6 +165,7 @@ class AYA_Checkout {
 		$order->update_meta_data( '_aya_agent', get_user_meta( $uid, 'aya_agent_name', true ) );
 		if ( is_array( $st ) && 'approved' === ( $st['status'] ?? '' ) ) {
 			$order->update_meta_data( '_aya_confirmed', $st['message'] );
+			$order->update_meta_data( '_aya_confirmed_how', $st['how'] ?? '' );
 			$order->add_order_note( sprintf( 'Placed by an AI agent (%s). The customer confirmed on their phone via Auth Your Agent (%s): "%s"',
 				get_user_meta( $uid, 'aya_agent_name', true ), $st['how'] ?? '', $st['message'] ) );
 			delete_user_meta( $uid, self::META );
@@ -168,12 +175,77 @@ class AYA_Checkout {
 		$order->save();
 	}
 
+	/** The badges an order has earned: approved on the phone, placed by a signed agent. Escaped HTML. */
+	public static function badges( $order ) {
+		$out = '';
+		if ( $order->get_meta( '_aya_confirmed' ) ) {
+			$how  = $order->get_meta( '_aya_confirmed_how' );
+			$tip  = sprintf(
+				/* translators: 1: the text the owner approved, 2: how they approved (e.g. passkey) */
+				__( 'The agent\'s owner approved "%1$s" on their phone%2$s before the order was placed.', 'authyouragent' ),
+				$order->get_meta( '_aya_confirmed' ),
+				$how ? ' (' . $how . ')' : ''
+			);
+			$out .= '<mark class="aya-badge aya-approved" title="' . esc_attr( $tip ) . '">' . esc_html__( 'Owner approved on phone', 'authyouragent' ) . '</mark> ';
+		} elseif ( $order->get_meta( '_aya_agent' ) ) {
+			$out .= '<mark class="aya-badge aya-agent" title="' . esc_attr__( 'Placed by an agent account without a phone confirmation.', 'authyouragent' ) . '">' . esc_html__( 'Agent order, not confirmed', 'authyouragent' ) . '</mark> ';
+		}
+		if ( $order->get_meta( '_aya_wba_agent' ) ) {
+			$out .= '<mark class="aya-badge aya-signed" title="' . esc_attr( $order->get_meta( '_aya_wba_agent' ) ) . '">' . esc_html__( 'Signed agent', 'authyouragent' ) . '</mark>';
+		}
+		return $out;
+	}
+
+	public static function badge_css() {
+		echo '<style>.aya-badge{display:inline-block;padding:2px 8px;border-radius:3px;font-size:12px;line-height:1.6;margin:2px 0}'
+			. '.aya-approved{background:#c6e1c6;color:#2c4700}.aya-agent{background:#f8dda7;color:#573b00}.aya-signed{background:#c8d7e1;color:#2e4453}</style>';
+	}
+
+	public static function column( $cols ) {
+		$out = array();
+		foreach ( $cols as $k => $v ) {
+			$out[ $k ] = $v;
+			if ( 'order_status' === $k ) {
+				$out['aya'] = esc_html__( 'Agent', 'authyouragent' );
+			}
+		}
+		if ( ! isset( $out['aya'] ) ) {
+			$out['aya'] = esc_html__( 'Agent', 'authyouragent' );
+		}
+		return $out;
+	}
+
+	public static function column_cell( $col, $order ) {
+		if ( 'aya' === $col && $order ) {
+			echo self::badges( $order ); // phpcs:ignore WordPress.Security.EscapeOutput -- built escaped
+		}
+	}
+
+	public static function column_cell_post( $col, $post_id ) {
+		if ( 'aya' === $col ) {
+			self::column_cell( $col, wc_get_order( $post_id ) );
+		}
+	}
+
 	public static function admin_badge( $order ) {
-		$agent = $order->get_meta( '_aya_agent' );
-		if ( ! $agent ) {
+		$badges = self::badges( $order );
+		if ( ! $badges ) {
 			return;
 		}
-		echo '<p class="form-field form-field-wide"><strong>' . esc_html__( 'Agent order', 'authyouragent' ) . ':</strong> '
-			. esc_html( $agent ) . ( $order->get_meta( '_aya_confirmed' ) ? ' &mdash; ' . esc_html__( 'confirmed by the customer', 'authyouragent' ) : '' ) . '</p>';
+		echo '<p class="form-field form-field-wide aya-badges">' . $badges; // phpcs:ignore WordPress.Security.EscapeOutput -- built escaped
+		if ( $order->get_meta( '_aya_confirmed' ) ) {
+			echo '<br><small>' . esc_html(
+				sprintf(
+					/* translators: 1: agent name, 2: the text the owner approved */
+					__( '%1$s placed it; its owner approved: "%2$s"', 'authyouragent' ),
+					$order->get_meta( '_aya_agent' ),
+					$order->get_meta( '_aya_confirmed' )
+				)
+			) . '</small>';
+		}
+		if ( $order->get_meta( '_aya_wba_agent' ) ) {
+			echo '<br><small>' . esc_html__( 'Signed by', 'authyouragent' ) . ' <code>' . esc_html( preg_replace( '#/\.well-known/http-message-signatures-directory$#', '', $order->get_meta( '_aya_wba_agent' ) ) ) . '</code></small>';
+		}
+		echo '</p>';
 	}
 }

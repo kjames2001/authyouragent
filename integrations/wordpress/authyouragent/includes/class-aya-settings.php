@@ -31,6 +31,9 @@ class AYA_Settings {
 			'button_label'   => sanitize_text_field( $in['button_label'] ?? '' ),
 			'role'           => sanitize_key( $in['role'] ?? '' ),
 			'confirm_orders' => empty( $in['confirm_orders'] ) ? '0' : '1',
+			'wba'            => empty( $in['wba'] ) ? '0' : '1',
+			'wba_mode'       => in_array( $in['wba_mode'] ?? '', array( 'all', 'listed' ), true ) ? $in['wba_mode'] : 'all',
+			'wba_refuse_invalid' => empty( $in['wba_refuse_invalid'] ) ? '0' : '1',
 		);
 		// an empty secret field keeps the saved secret
 		$s                    = trim( $in['client_secret'] ?? '' );
@@ -80,9 +83,17 @@ class AYA_Settings {
 			self::row( __( 'Order confirmation', 'authyouragent' ), '<label><input type="checkbox" name="aya_settings[confirm_orders]" value="1"' . checked( aya_opt( 'confirm_orders' ), '1', false ) . '> '
 				. esc_html__( 'Before an agent\'s order is placed, the customer confirms the basket and total on their phone', 'authyouragent' ) . '</label>' );
 		}
+		self::row( __( 'Signed agents', 'authyouragent' ), '<label><input type="checkbox" name="aya_settings[wba]" value="1"' . checked( aya_opt( 'wba' ), '1', false ) . '> '
+			. esc_html__( 'Check Web Bot Auth signatures, list the agents that visit, and label their orders', 'authyouragent' ) . '</label><br>'
+			. '<label><input type="radio" name="aya_settings[wba_mode]" value="all"' . checked( aya_opt( 'wba_mode' ), 'all', false ) . '> ' . esc_html__( 'Let every signed agent in, except those you block', 'authyouragent' ) . '</label><br>'
+			. '<label><input type="radio" name="aya_settings[wba_mode]" value="listed"' . checked( aya_opt( 'wba_mode' ), 'listed', false ) . '> ' . esc_html__( 'Let signed agents in only once you allow them', 'authyouragent' ) . '</label><br>'
+			. '<label><input type="checkbox" name="aya_settings[wba_refuse_invalid]" value="1"' . checked( aya_opt( 'wba_refuse_invalid' ), '1', false ) . '> '
+			. esc_html__( 'Refuse requests whose signature is invalid (forged, expired, or copied from another page)', 'authyouragent' ) . '</label>',
+			__( 'Works with any agent that signs, not only Auth Your Agent ones. Ordinary visitors and unsigned requests are never affected.', 'authyouragent' ) );
 		echo '</table>';
 		submit_button();
 		echo '</form>';
+		AYA_WBA_Site::section();
 		if ( aya_configured() ) {
 			$ok = AYA_Client::discovery() ? __( 'Provider reachable.', 'authyouragent' ) : __( 'Provider NOT reachable: check the address.', 'authyouragent' );
 			echo '<p><strong>' . esc_html( $ok ) . '</strong></p>';
