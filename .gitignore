@@ -31,6 +31,7 @@ cloud/oidc.py
 cloud/wba.py
 cloud/readiness.py
 cloud/checkagent.py
+cloud/operators.py
 cloud/static/index.html
 cloud/static/takeover.html
 cloud/static/sw.js
