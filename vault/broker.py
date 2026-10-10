@@ -1105,6 +1105,32 @@ class Vault:
         self.wba_key = None          # Ed25519 key, set once the cloud publishes it
         self.wba_agent = None        # Signature-Agent address (https://<label>.agents...)
         self.wba_next = 0
+        self.pm = (None, 0.0)        # owner's password-manager setting for this agent, and when read
+
+    async def pm_allowed(self):
+        """None if this agent may use the owner's password manager, else why not.
+        The owner turns it off (default: off when a company runs this browser).
+        Re-read at most every 30 s; if the cloud cannot be asked and the
+        setting was never read, refuse (fail closed)."""
+        val, at = self.pm
+        if val is None or time.time() - at > 30:
+            try:
+                st = await asyncio.to_thread(self.agent().check_status)
+                val = "off" if st.get("status") == "revoked" else (st.get("password_manager") or "allowed")
+                self.pm = (val, time.time())
+            except Exception as e:
+                _log("password-manager setting check failed:", e)
+                msg = str(e)
+                if "404" in msg or "removed" in msg or "rejected" in msg:
+                    self.pm = ("off", time.time())      # the agent is gone: no more fills
+                    return "this agent has been removed by its owner"
+                if val is None or time.time() - at > 300:
+                    return "could not check the owner's password-manager setting; try again shortly"
+        if val == "off":
+            return ("the owner has not allowed this agent to use their password manager. "
+                    "Use request_takeover so the owner signs in themselves, or ask them to turn "
+                    "it on for this agent in the Auth Your Agent app")
+        return None
 
     # ── agent credentials (take over, revocation checks) ──
     def agent(self):
@@ -3024,6 +3050,9 @@ def _field_ok(f, field):
 
 
 async def list_secrets(request):
+    why = await V.pm_allowed()
+    if why:
+        return web.json_response({"error": "secrets", "detail": why}, status=403)
     try:
         return web.json_response({"items": await bitwarden.STORE.list()})
     except bitwarden.SecretsError as e:
@@ -3035,6 +3064,9 @@ async def fill_secret(request):
     name, field, sel = str(body.get("name", "")), str(body.get("field", "password")), _ref_sel(body)
     if field not in ("username", "password", "totp"):
         return web.json_response({"error": "secrets", "detail": "field must be username, password or totp"}, status=400)
+    why = await V.pm_allowed()
+    if why:
+        return web.json_response({"error": "secrets", "detail": why}, status=403)
     page = await V.attach()
     V.used = True
     await _find(page, sel)
@@ -3204,6 +3236,9 @@ async def save_secret(request):
     except Exception:
         body = {}
     body = body if isinstance(body, dict) else {}
+    why = await V.pm_allowed()
+    if why:
+        return web.json_response({"error": "secrets", "detail": why}, status=403)
     page = await V.attach()
     V.used = True
     site = _site(urlparse(page.url).hostname)

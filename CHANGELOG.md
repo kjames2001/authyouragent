@@ -2,6 +2,16 @@
 
 Every release of the Python SDK, MCP server and browser vault (`authyouragent` on PyPI, `ghcr.io/kjames2001/authyouragent-vault`), with the changes to the service at authyouragent.com that shipped alongside it. Newest first. Versions are tagged `py-vX.Y.Z` (PyPI) and `js-vX.Y.Z` (npm).
 
+## 0.3.40 (2026-10-10)
+
+### The owner decides whether an agent may use their password manager
+- An agent can now be created by a company the owner connected (operator accounts, see the docs). When that company runs the agent's browser on its own computers, the company handles the pages the browser opens, including any sign-in filled from the owner's password manager.
+- So the vault now asks the service, at most every 30 seconds, whether the owner allows this agent to use their password manager. If not, `list_secrets`, `fill_secret` and `save_secret` are refused with a reason that tells the agent to use `request_takeover` instead, and nothing is filled. For agents a company runs, the setting is off until the owner turns it on for that agent in the app. Agents people create themselves are not affected.
+- If the service cannot be reached and the setting was never read, the vault refuses (it does not assume yes). A revoked agent is refused.
+
+### 0.3.39 (2026-10-10, SDK only)
+- `webbotauth.verify` and `Verifier` in the Python SDK check any agent's Web Bot Auth signature, not only ours. The JavaScript SDK has the same in `authyouragent/webbotauth` (npm 0.3.24).
+
 ## 0.3.38 (2026-10-09)
 
 ### Paid placement and text aimed at AI agents are labelled
