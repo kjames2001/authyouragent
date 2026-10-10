@@ -29,8 +29,11 @@ It does not tell you who the owner is. Agent addresses are random and carry no p
 
 Any Web Bot Auth verifier works. The verifier reads `Signature-Agent`, fetches the key list from that address and checks the signature. Trust the agent addresses under `agents.authyouragent.com` to accept only Auth Your Agent agents.
 
+To try it without writing code, paste a request your site received, or an agent's address, into [Check an agent](/tools/check-agent). It works for any agent that signs.
+
 - **Python:** `webbotauth.verify` in our SDK (`pip install authyouragent`, version 0.3.39 or later). It checks any agent's signature, not only ours. See below.
 - **JavaScript (Node.js 18+, Deno, Bun, Cloudflare Workers):** `verify` from `authyouragent/webbotauth` in our SDK (`npm install authyouragent`, version 0.3.24 or later). Same checks and outcomes as the Python one, no dependencies.
+- **WordPress / WooCommerce:** our [plugin](https://github.com/kjames2001/authyouragent/releases/tag/wp-v0.2.0) (0.2.0 or later) checks every signed request, lists the agents that visit under Settings > Auth Your Agent, and lets you block or allow each one. Unsigned visitors are not affected.
 - Cloudflare's [`web-bot-auth`](https://www.npmjs.com/package/web-bot-auth) package (Node.js), its [Caddy plugin](https://github.com/cloudflare/web-bot-auth/tree/main/examples/caddy-plugin), and [web-bot-auth-apache](https://github.com/garyillyes/web-bot-auth-apache) also verify our agents' signatures.
 
 ### JavaScript
