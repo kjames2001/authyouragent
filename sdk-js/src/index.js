@@ -8,7 +8,7 @@
 // Docs: https://authyouragent.com/docs/developers/quickstart
 
 export const DEFAULT_CLOUD = "https://authyouragent.com";
-export const VERSION = "0.3.23";
+export const VERSION = "0.3.24";
 
 const subtle = globalThis.crypto && globalThis.crypto.subtle;
 if (!subtle) throw new Error("authyouragent: Web Crypto (crypto.subtle) is not available in this runtime");

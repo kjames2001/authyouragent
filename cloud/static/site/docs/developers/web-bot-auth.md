@@ -30,24 +30,21 @@ It does not tell you who the owner is. Agent addresses are random and carry no p
 Any Web Bot Auth verifier works. The verifier reads `Signature-Agent`, fetches the key list from that address and checks the signature. Trust the agent addresses under `agents.authyouragent.com` to accept only Auth Your Agent agents.
 
 - **Python:** `webbotauth.verify` in our SDK (`pip install authyouragent`, version 0.3.39 or later). It checks any agent's signature, not only ours. See below.
-- **Node.js, Cloudflare Workers:** Cloudflare's [`web-bot-auth`](https://www.npmjs.com/package/web-bot-auth) package. Our own tests verify vault requests with it.
-- **Caddy:** Cloudflare's [Caddy plugin](https://github.com/cloudflare/web-bot-auth/tree/main/examples/caddy-plugin).
-- **Apache:** [web-bot-auth-apache](https://github.com/garyillyes/web-bot-auth-apache).
+- **JavaScript (Node.js 18+, Deno, Bun, Cloudflare Workers):** `verify` from `authyouragent/webbotauth` in our SDK (`npm install authyouragent`, version 0.3.24 or later). Same checks and outcomes as the Python one, no dependencies.
+- Cloudflare's [`web-bot-auth`](https://www.npmjs.com/package/web-bot-auth) package (Node.js), its [Caddy plugin](https://github.com/cloudflare/web-bot-auth/tree/main/examples/caddy-plugin), and [web-bot-auth-apache](https://github.com/garyillyes/web-bot-auth-apache) also verify our agents' signatures.
 
-A minimal Node.js check:
+### JavaScript
 
 ```js
-import { verify, parseSignatureAgentHeader } from "web-bot-auth";
-import { verifierFromJWK } from "web-bot-auth/crypto";
+import { verify } from "authyouragent/webbotauth";
 
-const agent = parseSignatureAgentHeader(request.headers.get("signature-agent")).entries[0].uri;
-if (!new URL(agent).hostname.endsWith(".agents.authyouragent.com")) throw new Error("not an Auth Your Agent agent");
-const dir = await (await fetch(agent + "/.well-known/http-message-signatures-directory")).json();
-await verify(request, {
-  resolver: async (c) => verifierFromJWK(dir.keys.find((k) => k.kid === c.keyid)),
-});
-// verified: `agent` is the agent's stable address
+const result = await verify(request);     // Fetch Request, Node/Express req, or { method, url, headers }
+if (result.verified) {
+  const agent = result.agent;             // the address its keys came from
+}
 ```
+
+A Fetch `Request` (Workers, Next.js, Deno, Bun) carries the full URL. A Node or Express request carries only the path, so the verifier takes the host from the `Host` header; behind a proxy, pass the public address: `verify(req, { publicBaseUrl: "https://shop.example" })`. The outcomes and limits are the same as in Python, below. In browsers and edge runtimes without Node's `dns` module, the key list is fetched with `fetch()`, so the public-address check is left to the runtime.
 
 ### Python
 
@@ -78,7 +75,7 @@ What it does for you:
 - **Caching:** key lists are cached as their `Cache-Control` says, and at least 60 seconds. If an agent's key list fails to load, the last good copy is used for up to a day and the result is marked `stale`.
 - **Refused signatures:** shared secrets (`hmac-sha256`), the published RFC 9421 example keys, and signatures valid for more than 24 hours are refused.
 
-To change these limits, create your own `webbotauth.Verifier(...)` and call its `verify` method. One verifier per process is enough.
+To change these limits, create your own `webbotauth.Verifier(...)` (JavaScript: `new Verifier({...})`) and call its `verify` method. One verifier per process is enough.
 
 Fetch each key list from the agent's address yourself, and cache it for no longer than its `Cache-Control` allows (five minutes). That is what makes a revoke reach you within five minutes. A list that fails to load says nothing about the agent: treat the request as unverified rather than as revoked.
 

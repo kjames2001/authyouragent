@@ -72,6 +72,19 @@ if (!a.stepup) return Response.json({ error: "stepup_required" }, { status: 403 
 
 `mode: "local"` checks passes without a network call per request, using cached signing keys and a signed revocation list (refreshed every `revTtl` seconds, default 60).
 
+## Web Bot Auth: recognise any signed agent
+
+`authyouragent/webbotauth` checks the [Web Bot Auth](https://datatracker.ietf.org/doc/draft-ietf-webbotauth-httpsig-protocol/) signature on a request from any agent, not only ours.
+
+```js
+import { verify } from "authyouragent/webbotauth";
+
+const result = await verify(request);     // Fetch Request, Node/Express req, or { method, url, headers }
+if (result.verified) console.log(result.agent);   // the address its keys came from
+```
+
+`result.outcome` is `verified`, `invalid` (wrong, expired, made for another page, or a published test key), `unverified` (not enough to decide, e.g. the key list could not be fetched) or `unsigned`. `result.reason` says why. For Node/Express requests, pass `{ publicBaseUrl: "https://shop.example" }` when your server sits behind a proxy. Key lists are fetched over HTTPS from public addresses only (5 s, 64 kB, no redirects) and cached as their `Cache-Control` says. Details: https://authyouragent.com/docs/developers/web-bot-auth
+
 ## Tests
 
 ```
