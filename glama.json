@@ -104,6 +104,18 @@
     {
       "name": "report_site",
       "description": "Report a site where take over did not work correctly."
+    },
+    {
+      "name": "save_secret",
+      "description": "After the owner signs in during a take over, offer to save that sign-in to their password manager. The owner confirms on their phone; the agent never sees it."
+    },
+    {
+      "name": "submit_plan",
+      "description": "Ask the owner once, in advance, to pre-approve the exact steps of a scheduled task, for a set number of daily or weekly runs."
+    },
+    {
+      "name": "plan_status",
+      "description": "The state of a submitted plan: for each step, whether it is approved, done or skipped."
     }
   ]
 }
